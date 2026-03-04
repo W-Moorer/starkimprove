@@ -1,0 +1,11 @@
+*.pyc
+*.pyi
+*.pyd
+build/
+codegen/
+output/
+documents/
+temps/
+.vscode/
+CMakeFiles/
+CMakeCache.txt
