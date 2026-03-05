@@ -39,6 +39,8 @@ namespace stark
 		double get_default_constraint_stiffness() const;
 		double get_default_constraint_distance_tolerance() const;
 		double get_default_constraint_angle_tolerance() const;
+		void set_joint_augmented_lagrangian_params(const EnergyRigidBodyConstraints::AugmentedLagrangianParams& params);
+		EnergyRigidBodyConstraints::AugmentedLagrangianParams get_joint_augmented_lagrangian_params() const;
 
 		// Add constraints
 		//// Base

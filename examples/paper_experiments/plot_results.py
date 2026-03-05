@@ -1,295 +1,302 @@
-import pandas as pd
+#!/usr/bin/env python3
+"""
+Generate paper figures for retained paper1 experiments (exp1/exp2/exp4/exp5) and D1/D2 MVP artifacts.
+"""
+
+from __future__ import annotations
+
+import argparse
+import math
+from pathlib import Path
+from typing import Callable, List, Tuple
+
 import matplotlib.pyplot as plt
-import os
+import numpy as np
+import pandas as pd
 
-# Settings for the plots
-plt.rcParams['font.family'] = 'serif'
-plt.rcParams['font.serif'] = ['Times New Roman']
-plt.rcParams['font.size'] = 14
-plt.rcParams['axes.labelsize'] = 14
-plt.rcParams['axes.titlesize'] = 16
-plt.rcParams['legend.fontsize'] = 12
-plt.rcParams['xtick.labelsize'] = 12
-plt.rcParams['ytick.labelsize'] = 12
-plt.rcParams['axes.linewidth'] = 1.2
-plt.rcParams['lines.linewidth'] = 2.0
 
-data_dir = r"E:\workspace\stark\output\paper_experiments"
-out_dir = r"E:\workspace\stark\documents\local\paper1\figs"
+SCRIPT_PATH = Path(__file__).resolve()
+REPO_ROOT = SCRIPT_PATH.parents[2]
+DEFAULT_DATA_DIR = REPO_ROOT / "output" / "paper_experiments"
+DEFAULT_OUT_DIR = REPO_ROOT / "documents" / "local" / "paper1" / "figs"
+DEFAULT_BASELINE_CSV = DEFAULT_DATA_DIR / "phase0_baseline_minlog.csv"
+DEFAULT_D1_CSV = DEFAULT_DATA_DIR / "d1_parameter_sensitivity.csv"
 
-os.makedirs(out_dir, exist_ok=True)
 
-# Helper function to configure axes
+plt.rcParams["font.family"] = "serif"
+plt.rcParams["font.serif"] = ["Times New Roman"]
+plt.rcParams["font.size"] = 13
+plt.rcParams["axes.labelsize"] = 13
+plt.rcParams["axes.titlesize"] = 14
+plt.rcParams["legend.fontsize"] = 11
+plt.rcParams["xtick.labelsize"] = 11
+plt.rcParams["ytick.labelsize"] = 11
+plt.rcParams["axes.linewidth"] = 1.1
+plt.rcParams["lines.linewidth"] = 1.8
+
+
 def setup_axes(ax):
-    ax.spines['top'].set_visible(False)
-    ax.spines['right'].set_visible(False)
-    ax.grid(True, linestyle='--', alpha=0.6)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.grid(True, linestyle="--", alpha=0.45)
 
-def load_ref_curve(csv_path, scale=1.0):
+
+def load_ref_curve(csv_path: Path, scale: float = 1.0) -> pd.DataFrame:
     df = pd.read_csv(csv_path)
-    x = pd.to_numeric(df.iloc[:, 0], errors='coerce')
-    y = pd.to_numeric(df.iloc[:, 1], errors='coerce') * scale
+    x = pd.to_numeric(df.iloc[:, 0], errors="coerce")
+    y = pd.to_numeric(df.iloc[:, 1], errors="coerce") * scale
     mask = x.notna() & y.notna()
-    out = pd.DataFrame({'t': x[mask], 'v': y[mask]}).sort_values('t')
+    return pd.DataFrame({"t": x[mask], "v": y[mask]}).sort_values("t")
+
+
+def sanitize_curve(df: pd.DataFrame, x_col: str, y_col: str, max_points: int = 2000) -> pd.DataFrame:
+    x = pd.to_numeric(df[x_col], errors="coerce")
+    y = pd.to_numeric(df[y_col], errors="coerce")
+    out = pd.DataFrame({x_col: x, y_col: y}).dropna()
+    out = out.drop_duplicates(subset=[x_col], keep="last").sort_values(x_col)
+    if len(out) > max_points:
+        step = int(math.ceil(len(out) / max_points))
+        out = out.iloc[::step].copy()
     return out
 
-# 1. Experiment 1: all box center z-curves
-try:
-    centers_path = os.path.join(data_dir, "exp1_adaptive", "centers_z.csv")
-    minz_path = os.path.join(data_dir, "exp1_adaptive", "min_z.csv")
+
+def save_fig(fig: plt.Figure, out_dir: Path, stem: str):
+    out_dir.mkdir(parents=True, exist_ok=True)
+    fig.tight_layout()
+    fig.savefig(out_dir / f"{stem}.svg", format="svg")
+    fig.savefig(out_dir / f"{stem}.pdf", format="pdf")
+    plt.close(fig)
+    print(f"Saved {stem}.svg/.pdf")
+
+
+def plot_exp1_settling(data_dir: Path, out_dir: Path):
+    centers_path = data_dir / "exp1_adaptive" / "centers_z.csv"
+    minz_path = data_dir / "exp1_adaptive" / "min_z.csv"
     fig, ax = plt.subplots(figsize=(6, 4))
     setup_axes(ax)
-    if os.path.exists(centers_path):
-        df1 = pd.read_csv(centers_path)
-        z_cols = [c for c in df1.columns if c.startswith('z_')]
-        for c in z_cols:
-            ax.plot(df1['t'], df1[c], alpha=0.7, linewidth=1.2)
-        ax.set_ylabel('Center Height z (m)')
-        ax.set_title('All Box Center-z Trajectories (Exp1)')
-    else:
-        df1 = pd.read_csv(minz_path)
-        ax.plot(df1['t'], df1['min_z'], color='#1f77b4', label='Minimum Object Z-Coordinate')
-        ax.set_ylabel('Vertical Position (m)')
-        ax.set_title('Settling Dynamics and Stability (Fallback)')
+
+    if centers_path.exists():
+        df = pd.read_csv(centers_path)
+        if "t" in df.columns:
+            t = pd.to_numeric(df["t"], errors="coerce")
+            z_cols = [c for c in df.columns if c.startswith("z_")]
+            for c in z_cols:
+                z = pd.to_numeric(df[c], errors="coerce")
+                mask = t.notna() & z.notna()
+                ax.plot(t[mask], z[mask], alpha=0.6, linewidth=1.0)
+            ax.set_ylabel("Center Height z (m)")
+            ax.set_title("Exp1: Box Center-z Trajectories")
+    elif minz_path.exists():
+        df = pd.read_csv(minz_path)
+        curve = sanitize_curve(df, "t", "min_z")
+        ax.plot(curve["t"], curve["min_z"], color="#1f77b4", label="Minimum Object Z")
         ax.legend()
-    ax.set_xlabel('Time (s)')
-    plt.tight_layout()
-    plt.savefig(os.path.join(out_dir, "exp1_settling.svg"), format='svg')
-    plt.savefig(os.path.join(out_dir, "exp1_settling.pdf"), format='pdf')
-    plt.close()
-    print("Saved exp1_settling.svg")
-except Exception as e:
-    print(f"Error plotting Exp1: {e}")
-
-# 2. Experiment 2: High-speed impact
-try:
-    fig, ax = plt.subplots(figsize=(6, 4))
-    setup_axes(ax)
-    colors = ['#2ca02c', '#ff7f0e', '#d62728']
-    
-    for c, v in zip(colors, [10, 100, 500]):
-        filepath = os.path.join(data_dir, f"exp2_v{v}", "impact_state.csv")
-        if os.path.exists(filepath):
-            df2 = pd.read_csv(filepath)
-            df2 = df2.drop_duplicates(subset=['t'], keep='last')
-            ax.plot(df2['t'], df2['x'], color=c, label=f'v0 = {v} m/s')
-            
-    # Add a shaded region representing the Wall
-    ax.axhspan(1.5, 2.5, color='gray', alpha=0.3, label='Wall Extent')
-            
-    ax.set_xlabel('Time (s)')
-    ax.set_ylabel('Horizontal Position X (m)')
-    ax.set_title('High-Speed Impact and Bouncing')
-    ax.legend(loc='lower right')
-    plt.tight_layout()
-    plt.savefig(os.path.join(out_dir, "exp2_impact.svg"), format='svg')
-    plt.savefig(os.path.join(out_dir, "exp2_impact.pdf"), format='pdf')
-    plt.close()
-    print("Saved exp2_impact.svg")
-except Exception as e:
-    print(f"Error plotting Exp2: {e}")
-
-# 3. Experiment 3: Stick-slip
-try:
-    df12 = pd.read_csv(os.path.join(data_dir, "exp3_theta12", "velocity.csv"))
-    df20 = pd.read_csv(os.path.join(data_dir, "exp3_theta20", "velocity.csv"))
-
-    df12 = df12.drop_duplicates(subset=['t'], keep='last').sort_values('t')
-    df20 = df20.drop_duplicates(subset=['t'], keep='last').sort_values('t')
-
-    # Reprocess by parameters: detect release time from phase flag for each case
-    release12 = float(df12.loc[df12['phase'] == 1, 't'].iloc[0]) if (df12['phase'] == 1).any() else 0.0
-    release20 = float(df20.loc[df20['phase'] == 1, 't'].iloc[0]) if (df20['phase'] == 1).any() else 0.0
-    
-    fig, ax = plt.subplots(figsize=(6, 4))
-    setup_axes(ax)
-    
-    ax.plot(df12['t'], df12['v_x'], color='#1f77b4', label=r'$\theta=12^\circ$')
-    ax.plot(df20['t'], df20['v_x'], color='#d62728', label=r'$\theta=20^\circ$')
-
-    if abs(release12 - release20) < 1e-6:
-        ax.axvline(release12, color='gray', linestyle='--', linewidth=1.2, label=f'Release at {release12:.2f} s')
+        ax.set_ylabel("Vertical Position (m)")
+        ax.set_title("Exp1: Settling Dynamics")
     else:
-        ax.axvline(release12, color='#1f77b4', linestyle='--', linewidth=1.2, alpha=0.8, label=f'Release 12° ({release12:.2f} s)')
-        ax.axvline(release20, color='#d62728', linestyle='--', linewidth=1.2, alpha=0.8, label=f'Release 20° ({release20:.2f} s)')
+        raise FileNotFoundError("Missing exp1 input csv.")
 
-    ax.set_xlabel('Time (s)')
-    ax.set_ylabel(r'Downslope Velocity $v_x$ (m/s)')
-    ax.set_title(r'Fixed-Angle Friction Test ($\mu=0.3$)')
-    
-    ax.legend()
-    plt.tight_layout()
-    plt.savefig(os.path.join(out_dir, "exp3_stick_slip.svg"), format='svg')
-    plt.savefig(os.path.join(out_dir, "exp3_stick_slip.pdf"), format='pdf')
-    plt.close()
-    print("Saved exp3_stick_slip.svg")
-except Exception as e:
-    print(f"Error plotting Exp3: {e}")
+    ax.set_xlabel("Time (s)")
+    save_fig(fig, out_dir, "exp1_settling")
 
-# 4. Experiment 4: Joint Drift
-try:
-    df4 = pd.read_csv(os.path.join(data_dir, "exp4_coupled_joints", "joint_drift.csv"))
+
+def plot_exp2_impact(data_dir: Path, out_dir: Path):
     fig, ax = plt.subplots(figsize=(6, 4))
     setup_axes(ax)
-    # The drift can be very small, plot in log scale if it's strictly > 0
-    ax.plot(df4['t'], df4['max_drift'] * 1000, color='#e377c2', label='Max Constraint Violation')
-    ax.set_xlabel('Time (s)')
-    ax.set_ylabel('Joint Drift (mm)')
-    ax.set_title('Coupled Joints Constraint Accuracy')
-    
-    # Use scientific notation for Y-axis if needed, but we scaled to mm
+    colors = ["#2ca02c", "#ff7f0e", "#d62728"]
+    speeds = [10, 100, 500]
+    plotted = False
+    for color, v0 in zip(colors, speeds):
+        path = data_dir / f"exp2_v{v0}" / "impact_state.csv"
+        if not path.exists():
+            continue
+        df = pd.read_csv(path)
+        curve = sanitize_curve(df, "t", "x")
+        ax.plot(curve["t"], curve["x"], color=color, label=f"v0 = {v0} m/s")
+        plotted = True
+
+    if not plotted:
+        raise FileNotFoundError("Missing exp2 impact csv.")
+
+    ax.axhspan(1.5, 2.5, color="gray", alpha=0.25, label="Wall extent")
+    ax.set_xlabel("Time (s)")
+    ax.set_ylabel("Horizontal Position x (m)")
+    ax.set_title("A2 Seed: High-Speed Impact")
+    ax.legend(loc="lower right")
+    save_fig(fig, out_dir, "exp2_impact")
+
+
+def plot_exp4_drift_compare(data_dir: Path, out_dir: Path):
+    base_path = data_dir / "exp4_coupled_joints" / "joint_drift.csv"
+    al_path = data_dir / "exp4_coupled_joints_al" / "joint_drift.csv"
+    if not base_path.exists():
+        raise FileNotFoundError("Missing exp4 baseline joint_drift.csv.")
+
+    base_df = sanitize_curve(pd.read_csv(base_path), "t", "max_drift")
+    al_df = sanitize_curve(pd.read_csv(al_path), "t", "max_drift") if al_path.exists() else None
+
+    fig, ax = plt.subplots(figsize=(6, 4))
+    setup_axes(ax)
+    ax.plot(base_df["t"], 1e3 * base_df["max_drift"], color="#e377c2", label="Soft-constraint baseline")
+    if al_df is not None and not al_df.empty:
+        ax.plot(al_df["t"], 1e3 * al_df["max_drift"], color="#1f77b4", label="AL-IPC")
+    ax.set_xlabel("Time (s)")
+    ax.set_ylabel("Joint Drift (mm)")
+    ax.set_title("A1 Seed: Joint Drift Baseline vs AL")
     ax.legend()
-    plt.tight_layout()
-    plt.savefig(os.path.join(out_dir, "exp4_drift.svg"), format='svg')
-    plt.savefig(os.path.join(out_dir, "exp4_drift.pdf"), format='pdf')
-    plt.close()
-    print("Saved exp4_drift.svg")
-except Exception as e:
-    print(f"Error plotting Exp4: {e}")
+    save_fig(fig, out_dir, "a1_joint_drift_compare")
 
-# 5. Experiment 5: Screw-nut y/vy vs reference (mu=0)
-try:
-    df5 = pd.read_csv(os.path.join(data_dir, "exp5_bolt", "screw_state.csv"))
-    df5 = df5.drop_duplicates(subset=['t'], keep='last').sort_values('t')
+    # Backward-compatible file names
+    fig2, ax2 = plt.subplots(figsize=(6, 4))
+    setup_axes(ax2)
+    ax2.plot(base_df["t"], 1e3 * base_df["max_drift"], color="#e377c2", label="Max Constraint Violation")
+    ax2.set_xlabel("Time (s)")
+    ax2.set_ylabel("Joint Drift (mm)")
+    ax2.set_title("Coupled Joints Constraint Accuracy")
+    ax2.legend()
+    save_fig(fig2, out_dir, "exp4_drift")
 
-    ref_pos5 = load_ref_curve(os.path.join(data_dir, "exp5_ref", "Pos_Ty_mu0.csv"), scale=0.01)
-    ref_vel5 = load_ref_curve(os.path.join(data_dir, "exp5_ref", "Vel_Ty_mu0.csv"), scale=0.01)
 
-    # Reprocess: align position zero-level between simulation and reference
-    y0_sim = float(df5['y'].iloc[0])
-    y0_ref = float(ref_pos5['v'].iloc[0])
-    df5_y_aligned = df5['y'] - y0_sim
-    ref_pos5_aligned = ref_pos5['v'] - y0_ref
+def plot_exp5_bolt_vs_ref(data_dir: Path, out_dir: Path):
+    sim_path = data_dir / "exp5_bolt" / "screw_state.csv"
+    ref_pos_path = data_dir / "exp5_ref" / "Pos_Ty_mu0.csv"
+    ref_vel_path = data_dir / "exp5_ref" / "Vel_Ty_mu0.csv"
+    if not sim_path.exists() or not ref_pos_path.exists() or not ref_vel_path.exists():
+        raise FileNotFoundError("Missing exp5 simulation/reference csv.")
 
-    fig, axs = plt.subplots(2, 1, figsize=(6, 6), sharex=True)
-    setup_axes(axs[0])
-    setup_axes(axs[1])
+    sim_df = pd.read_csv(sim_path)
+    sim_df = sim_df.drop_duplicates(subset=["t"], keep="last").sort_values("t")
+    ref_pos = load_ref_curve(ref_pos_path, scale=0.01)
+    ref_vel = load_ref_curve(ref_vel_path, scale=0.01)
 
-    axs[0].plot(df5['t'], df5_y_aligned, color='#1f77b4', label='IPC (mu=0, aligned)')
-    axs[0].plot(ref_pos5['t'], ref_pos5_aligned, color='black', linestyle='--', linewidth=1.6, label='Reference (mu=0, aligned)')
-    axs[0].set_ylabel('Position y (m)')
-    axs[0].set_title('Exp5 Screw Y / Vy vs Reference')
-    axs[0].legend(loc='upper right')
-
-    axs[1].plot(df5['t'], df5['vy'], color='#1f77b4', label='IPC (mu=0)')
-    axs[1].plot(ref_vel5['t'], ref_vel5['v'], color='black', linestyle='--', linewidth=1.6, label='Reference (mu=0)')
-    axs[1].set_xlabel('Time (s)')
-    axs[1].set_ylabel(r'Velocity $v_y$ (m/s)')
-    axs[1].legend(loc='lower right')
-
-    plt.tight_layout()
-    plt.savefig(os.path.join(out_dir, "exp5_bolt_vs_ref.svg"), format='svg')
-    plt.savefig(os.path.join(out_dir, "exp5_bolt_vs_ref.pdf"), format='pdf')
-    plt.close()
-    print("Saved exp5_bolt_vs_ref.svg")
-except Exception as e:
-    print(f"Error plotting Exp5: {e}")
-
-# 6. Experiment 6: Screw-nut friction effect + reference overlay
-try:
-    df_mu03 = pd.read_csv(os.path.join(data_dir, "exp6_mu03", "state.csv"))
-
-    df_mu03 = df_mu03.drop_duplicates(subset=['t'], keep='last').sort_values('t')
-
-    ref_pos_mu03_path = os.path.join(data_dir, "exp6_ref", "Pos_Ty_mu0.3.csv")
-    ref_vel_mu03_path = os.path.join(data_dir, "exp6_ref", "Vel_Ty_mu0.3.csv")
-
-    ref_pos_mu03 = load_ref_curve(ref_pos_mu03_path, scale=0.01) if os.path.exists(ref_pos_mu03_path) else None
-    ref_vel_mu03 = load_ref_curve(ref_vel_mu03_path, scale=0.01) if os.path.exists(ref_vel_mu03_path) else None
+    y0_sim = float(sim_df["y"].iloc[0])
+    y0_ref = float(ref_pos["v"].iloc[0])
+    y_aligned = sim_df["y"] - y0_sim
+    ref_y_aligned = ref_pos["v"] - y0_ref
 
     fig, axs = plt.subplots(2, 1, figsize=(6, 6), sharex=True)
     setup_axes(axs[0])
     setup_axes(axs[1])
 
-    axs[0].plot(df_mu03['t'], df_mu03['y'], color='#d62728', label=r'$\mu=0.3$')
-    if ref_pos_mu03 is not None:
-        axs[0].plot(ref_pos_mu03['t'], ref_pos_mu03['v'], color='black', linestyle='-', linewidth=1.2, label=r'Reference $\mu=0.3$')
-    axs[0].set_ylabel('Position y (m)')
-    axs[0].set_title('Screw Position/Velocity under Friction (Exp6)')
-    axs[0].legend(loc='lower right')
+    axs[0].plot(sim_df["t"], y_aligned, color="#1f77b4", label="IPC (aligned)")
+    axs[0].plot(ref_pos["t"], ref_y_aligned, color="black", linestyle="--", linewidth=1.5, label="Reference (aligned)")
+    axs[0].set_ylabel("Position y (m)")
+    axs[0].set_title("Exp5: Screw y / vy vs Reference")
+    axs[0].legend(loc="upper right")
 
-    axs[1].plot(df_mu03['t'], df_mu03['vy'], color='#d62728', label=r'$\mu=0.3$')
-    if ref_vel_mu03 is not None:
-        axs[1].plot(ref_vel_mu03['t'], ref_vel_mu03['v'], color='black', linestyle='-', linewidth=1.2, label=r'Reference $\mu=0.3$')
-    axs[1].set_xlabel('Time (s)')
-    axs[1].set_ylabel(r'Velocity $v_y$ (m/s)')
-    axs[1].legend(loc='lower right')
+    axs[1].plot(sim_df["t"], sim_df["vy"], color="#1f77b4", label="IPC")
+    axs[1].plot(ref_vel["t"], ref_vel["v"], color="black", linestyle="--", linewidth=1.5, label="Reference")
+    axs[1].set_xlabel("Time (s)")
+    axs[1].set_ylabel(r"Velocity $v_y$ (m/s)")
+    axs[1].legend(loc="lower right")
+    save_fig(fig, out_dir, "exp5_bolt_vs_ref")
 
-    plt.tight_layout()
-    plt.savefig(os.path.join(out_dir, "exp6_friction_effect.svg"), format='svg')
-    plt.savefig(os.path.join(out_dir, "exp6_friction_effect.pdf"), format='pdf')
-    plt.close()
-    print("Saved exp6_friction_effect.svg")
-except Exception as e:
-    print(f"Error plotting Exp6: {e}")
 
-# 7. Experiment 7: Anchor-cube adaptive stiffness sensitivity (overlay kappa curves)
-try:
-    kappa_cases = [
-        ("k1e6",  r'$\kappa=10^6$'),
-        ("k1e7",  r'$\kappa=10^7$'),
-        ("k1e8",  r'$\kappa=10^8$'),
-        ("k1e9",  r'$\kappa=10^9$'),
+def plot_d2_runtime(baseline_csv: Path, out_dir: Path):
+    if not baseline_csv.exists():
+        raise FileNotFoundError("Missing phase0_baseline_minlog.csv.")
+    df = pd.read_csv(baseline_csv)
+    d2 = df[df["case_id"] == "D2_seed_stack20"].copy()
+    if d2.empty:
+        raise ValueError("No D2_seed_stack20 rows in baseline csv.")
+
+    d2 = d2.sort_values("output_dir")
+    labels = d2["output_dir"].astype(str).tolist()
+    total = pd.to_numeric(d2["total"], errors="coerce").fillna(0.0).to_numpy()
+    failed = pd.to_numeric(d2["failed_step_time"], errors="coerce").fillna(0.0).to_numpy()
+
+    x = np.arange(len(labels))
+    w = 0.38
+    fig, ax = plt.subplots(figsize=(7, 4))
+    setup_axes(ax)
+    ax.bar(x - w / 2, total, width=w, color="#4c78a8", label="Total Runtime (s)")
+    ax.bar(x + w / 2, failed, width=w, color="#f58518", label="Failed-Step Time (s)")
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels, rotation=12, ha="right")
+    ax.set_ylabel("Time (s)")
+    ax.set_title("D2: Runtime Breakdown by Stiffness Strategy")
+    ax.legend()
+    save_fig(fig, out_dir, "d2_runtime_breakdown")
+
+
+def plot_d1_pareto(d1_csv: Path, out_dir: Path):
+    if not d1_csv.exists():
+        raise FileNotFoundError("Missing d1_parameter_sensitivity.csv.")
+    df = pd.read_csv(d1_csv)
+    if df.empty:
+        raise ValueError("D1 csv is empty.")
+    for col in ("total", "joint_error_max_l2", "rho0"):
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+    df = df.dropna(subset=["total", "joint_error_max_l2", "rho0"])
+    if df.empty:
+        raise ValueError("D1 csv has no valid rows for Pareto plotting.")
+
+    fig, ax = plt.subplots(figsize=(6, 4))
+    setup_axes(ax)
+    sc = ax.scatter(df["joint_error_max_l2"], df["total"], c=df["rho0"], cmap="viridis", s=36, alpha=0.9)
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.set_xlabel("Joint Error Max L2 (m)")
+    ax.set_ylabel("Total Runtime (s)")
+    ax.set_title("D1: Error-Cost Pareto Seeds")
+    cbar = fig.colorbar(sc, ax=ax)
+    cbar.set_label("rho0")
+    save_fig(fig, out_dir, "d1_pareto_total_vs_error")
+
+
+def run_all(data_dir: Path, out_dir: Path, baseline_csv: Path, d1_csv: Path):
+    tasks: List[Tuple[str, Callable[[], None]]] = [
+        ("exp1_settling", lambda: plot_exp1_settling(data_dir, out_dir)),
+        ("exp2_impact", lambda: plot_exp2_impact(data_dir, out_dir)),
+        ("exp4_drift_compare", lambda: plot_exp4_drift_compare(data_dir, out_dir)),
+        ("exp5_bolt_vs_ref", lambda: plot_exp5_bolt_vs_ref(data_dir, out_dir)),
+        ("d2_runtime_breakdown", lambda: plot_d2_runtime(baseline_csv, out_dir)),
+        ("d1_pareto_total_vs_error", lambda: plot_d1_pareto(d1_csv, out_dir)),
     ]
-    colors = ['#1f77b4', '#2ca02c', '#ff7f0e', '#d62728']
+    errors = []
+    for name, fn in tasks:
+        try:
+            fn()
+        except Exception as exc:  # pragma: no cover - best effort for partial outputs
+            errors.append((name, str(exc)))
+            print(f"[plot_results] {name} failed: {exc}")
+    if errors:
+        print("[plot_results] completed with warnings.")
+        for name, msg in errors:
+            print(f"  - {name}: {msg}")
+    else:
+        print("[plot_results] all figures generated.")
 
-    axis_specs = [
-        ('x', 'vx', 'X'),
-        ('y', 'vy', 'Y'),
-        ('z', 'vz', 'Z'),
-    ]
 
-    for idx_axis, (pos_col, vel_col, axis_tag) in enumerate(axis_specs):
-        fig, axs = plt.subplots(2, 1, figsize=(6, 6), sharex=True)
-        setup_axes(axs[0])
-        setup_axes(axs[1])
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Generate paper1 experiment figures.")
+    parser.add_argument("--data-dir", type=Path, default=DEFAULT_DATA_DIR, help=f"Data directory (default: {DEFAULT_DATA_DIR})")
+    parser.add_argument("--out-dir", type=Path, default=DEFAULT_OUT_DIR, help=f"Figure output directory (default: {DEFAULT_OUT_DIR})")
+    parser.add_argument(
+        "--baseline-csv",
+        type=Path,
+        default=DEFAULT_BASELINE_CSV,
+        help=f"Phase0 baseline CSV (default: {DEFAULT_BASELINE_CSV})",
+    )
+    parser.add_argument(
+        "--d1-csv",
+        type=Path,
+        default=DEFAULT_D1_CSV,
+        help=f"D1 sweep CSV (default: {DEFAULT_D1_CSV})",
+    )
+    return parser.parse_args()
 
-        plotted_any = False
-        for (case_name, label), c in zip(kappa_cases, colors):
-            state_path = os.path.join(data_dir, f"exp7_{case_name}", "state.csv")
-            if not os.path.exists(state_path):
-                print(f"Skip Exp7 {case_name}: missing state.csv")
-                continue
 
-            dfi = pd.read_csv(state_path)
-            dfi = dfi.drop_duplicates(subset=['t'], keep='last').sort_values('t')
-            if dfi.empty:
-                print(f"Skip Exp7 {case_name}: empty state.csv")
-                continue
+def main() -> int:
+    args = parse_args()
+    run_all(
+        data_dir=args.data_dir.resolve(),
+        out_dir=args.out_dir.resolve(),
+        baseline_csv=args.baseline_csv.resolve(),
+        d1_csv=args.d1_csv.resolve(),
+    )
+    return 0
 
-            p0 = float(dfi[pos_col].iloc[0])
-            axs[0].plot(dfi['t'], dfi[pos_col] - p0, color=c, label=label)
-            axs[1].plot(dfi['t'], dfi[vel_col], color=c, label=label)
-            plotted_any = True
 
-        if plotted_any:
-            axs[0].set_ylabel(f'Position {pos_col} (m, aligned)')
-            axs[0].set_title(fr'Exp7 Adaptive Stiffness Sensitivity ({axis_tag}-axis)')
-
-            if idx_axis == 1:  # Y-axis: upper plot legend at upper right
-                axs[0].legend(loc='upper right')
-            else:  # X-axis and Z-axis: legend at lower left
-                axs[0].legend(loc='lower left')
-
-            axs[1].set_xlabel('Time (s)')
-            axs[1].set_ylabel(fr'Velocity ${vel_col}$ (m/s)')
-
-            if idx_axis == 0:  # X-axis: lower plot legend at upper right
-                axs[1].legend(loc='upper right')
-            elif idx_axis == 1:  # Y-axis: lower plot legend at lower right
-                axs[1].legend(loc='lower right')
-            else:  # Z-axis: legend at lower left
-                axs[1].legend(loc='lower left')
-
-            plt.tight_layout()
-            stem = f"exp7_kappa_sensitivity_{pos_col}"
-            plt.savefig(os.path.join(out_dir, stem + ".svg"), format='svg')
-            plt.savefig(os.path.join(out_dir, stem + ".pdf"), format='pdf')
-            print(f"Saved {stem}.svg")
-        else:
-            print(f"Skip Exp7 {axis_tag}-axis plot: no valid exp7 state.csv found")
-        plt.close()
-except Exception as e:
-    print(f"Error plotting Exp7: {e}")
-
-print("All done.")
+if __name__ == "__main__":
+    raise SystemExit(main())

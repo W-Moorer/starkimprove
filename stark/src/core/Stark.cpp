@@ -162,6 +162,7 @@ bool Stark::run_one_step()
 		const double runtime = omp_get_wtime() - t0;
 		this->console.print("\n", ConsoleVerbosity::TimeSteps);
 		this->logger.add("failed_steps", runtime);
+		this->logger.add("failed_step_time", runtime);
 		this->logger.add_to_counter("failed_step_count", 1);
 
 		// The failure was due to loose stiffnesses

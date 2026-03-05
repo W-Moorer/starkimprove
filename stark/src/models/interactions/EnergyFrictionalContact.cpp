@@ -909,6 +909,11 @@ void stark::EnergyFrictionalContact::_on_intermidiate_state_invalid(core::Stark&
 			"Penetration couldn't be avoided. Contact stiffness hardened from {:.1e} to {:.1e}.",
 			old_stiffness, this->contact_stiffness));
 	}
+
+	if (this->contact_stiffness > old_stiffness) {
+		stark.logger.add_to_counter("hardening_count", 1);
+		stark.logger.add_to_counter("contact_hardening_count", 1);
+	}
 }
 void stark::EnergyFrictionalContact::_on_time_step_accepted(core::Stark& stark)
 {

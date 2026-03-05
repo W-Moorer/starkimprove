@@ -164,6 +164,7 @@ stark::core::NewtonState stark::core::NewtonsMethod::solve(const double& dt, sym
 	// Log
 	logger.add_to_counter("newton_iterations", this->step_newton_it);
 	logger.add_to_counter("CG_iterations", this->cg_iterations_in_step);
+	logger.add_to_counter("linear_iterations", this->cg_iterations_in_step);
 	logger.add_to_counter("line_search_iterations", this->step_line_search_count);
 
 	// Return
@@ -266,7 +267,9 @@ double stark::core::NewtonsMethod::_compute_acceleration_correction(double du, d
 double stark::core::NewtonsMethod::_forcing_sequence(const Eigen::VectorXd& rhs)
 {
 	const double grad_norm = rhs.norm();
-	const double cg_tol = std::min(0.1 /* TODO: find a better cap.*/, grad_norm * std::min(0.5, std::sqrt(grad_norm)));
+	const double base_cg_tol = std::min(0.1 /* TODO: find a better cap.*/, grad_norm * std::min(0.5, std::sqrt(grad_norm)));
+	const double scale = std::max(1e-12, this->settings->newton.cg_tolerance_multiplier);
+	const double cg_tol = std::max(1e-14, base_cg_tol * scale);
 	return cg_tol;
 }
 

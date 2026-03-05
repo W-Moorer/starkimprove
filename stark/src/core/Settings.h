@@ -54,6 +54,7 @@ namespace stark::core
 			int max_newton_iterations = 100;
 			int max_line_search_iterations = 10;
 			double line_search_multiplier = 0.5;
+			double cg_tolerance_multiplier = 1.0; // Scales forcing-sequence tolerance (smaller -> tighter linear solve)
 			double cg_max_iterations_multiplier = 1.0;
 			double epsilon_residual = 1e-12;  // Does not apply the correction if the residual is below this value. Avoids numerical instability in CG.
 		};

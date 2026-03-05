@@ -33,6 +33,14 @@ double stark::RigidBodies::get_default_constraint_angle_tolerance() const
 {
 	return this->default_tolerance_in_deg;
 }
+void stark::RigidBodies::set_joint_augmented_lagrangian_params(const EnergyRigidBodyConstraints::AugmentedLagrangianParams& params)
+{
+	this->constraints->set_augmented_lagrangian_params(params);
+}
+stark::EnergyRigidBodyConstraints::AugmentedLagrangianParams stark::RigidBodies::get_joint_augmented_lagrangian_params() const
+{
+	return this->constraints->get_augmented_lagrangian_params();
+}
 stark::RigidBodyHandler stark::RigidBodies::add(const double mass, const Eigen::Matrix3d& inertia_local)
 {
 	const int rb_idx = this->rb->add();

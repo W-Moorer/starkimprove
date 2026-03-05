@@ -8,11 +8,69 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <cstdlib>
 
 namespace {
     const std::string kCodegenDir = "e:/workspace/stark/codegen";
     const std::string kOutputBase = "e:/workspace/stark/output/paper_experiments";
     const std::string kModelsDir = "e:/workspace/stark/models";
+
+    bool env_flag(const char* key, bool default_value = false)
+    {
+        const char* raw = std::getenv(key);
+        if (raw == nullptr) {
+            return default_value;
+        }
+        const std::string v(raw);
+        return v == "1" || v == "true" || v == "TRUE" || v == "on" || v == "ON";
+    }
+
+    double env_double(const char* key, double default_value)
+    {
+        const char* raw = std::getenv(key);
+        if (raw == nullptr) {
+            return default_value;
+        }
+        const double parsed = std::atof(raw);
+        return std::isfinite(parsed) ? parsed : default_value;
+    }
+
+    int env_int(const char* key, int default_value)
+    {
+        const char* raw = std::getenv(key);
+        if (raw == nullptr) {
+            return default_value;
+        }
+        const int parsed = std::atoi(raw);
+        return (parsed > 0) ? parsed : default_value;
+    }
+
+    bool configure_joint_al_from_env(stark::Simulation& sim)
+    {
+        const bool enabled = env_flag("STARK_JOINT_AL_ENABLED", false);
+        if (!enabled) {
+            return false;
+        }
+
+        stark::EnergyRigidBodyConstraints::AugmentedLagrangianParams params;
+        params.enabled = true;
+        params.adaptive_rho = env_flag("STARK_JOINT_AL_ADAPTIVE_RHO", true);
+        params.rho0 = env_double("STARK_JOINT_AL_RHO0", 1e5);
+        params.rho_update_ratio = env_double("STARK_JOINT_AL_RHO_UPDATE_RATIO", 1.5);
+        params.sufficient_decrease_ratio = env_double("STARK_JOINT_AL_SUFFICIENT_DECREASE_RATIO", 0.9);
+        params.max_outer_iterations = env_int("STARK_JOINT_AL_MAX_OUTER", 8);
+        params.residual_smoothing = env_double("STARK_JOINT_AL_RESIDUAL_SMOOTHING", 1e-4);
+
+        sim.rigidbodies->set_joint_augmented_lagrangian_params(params);
+        return true;
+    }
+
+    void configure_solver_from_env(stark::Settings& settings)
+    {
+        settings.newton.residual.tolerance = env_double("STARK_NEWTON_TOL", settings.newton.residual.tolerance);
+        settings.newton.cg_tolerance_multiplier = env_double("STARK_LINEAR_TOL", settings.newton.cg_tolerance_multiplier);
+        settings.newton.cg_max_iterations_multiplier = env_double("STARK_CG_MAX_IT_MUL", settings.newton.cg_max_iterations_multiplier);
+    }
 
     std::tuple<std::vector<Eigen::Vector3d>, std::vector<std::array<int, 3>>> load_and_merge_obj_mesh(const std::string& path, double scale_factor)
     {
@@ -239,93 +297,25 @@ void exp2_high_speed_impact() {
     run_exp2_variation(500.0);
 }
 
-// --- Exp 3: Stick-Slip Transition ---
-void exp3_stick_slip_transition() {
-    std::cout << "Running Exp 3: Fixed-Angle Friction Validation..." << std::endl;
-
-    auto run_exp3_case = [](const std::string& case_name, const double theta_deg) {
-        stark::Settings settings;
-        settings.output.simulation_name = "exp3_" + case_name;
-        settings.output.output_directory = kOutputBase + "/exp3_" + case_name;
-        settings.output.codegen_directory = kCodegenDir;
-        settings.debug.symx_suppress_compiler_output = false;
-        settings.debug.symx_force_load = false;
-        settings.execution.end_simulation_time = 4.0;
-        settings.simulation.init_frictional_contact = true;
-        settings.simulation.max_time_step_size = 2e-4;
-
-        stark::Simulation sim(settings);
-
-        auto c_params = sim.interactions->contact->get_global_params();
-        c_params.default_contact_thickness = 5e-4;
-        c_params.min_contact_stiffness = 2e4;
-        c_params.friction_stick_slide_threshold = 0.01;
-        sim.interactions->contact->set_global_params(c_params);
-
-        stark::EnergyFrictionalContact::Params contact_params;
-        contact_params.contact_thickness = 5e-4;
-        auto slope = sim.presets->rigidbodies->add_box("slope", 1.0, {10.0, 2.0, 0.1}, contact_params);
-        slope.handler.rigidbody.set_translation({0.0, 0.0, -0.05});
-        sim.rigidbodies->add_constraint_fix(slope.handler.rigidbody);
-
-        auto block = sim.presets->rigidbodies->add_box("block", 1.0, {0.2, 0.2, 0.2}, contact_params);
-        block.handler.rigidbody.set_translation({0.0, 0.0, 0.1005});
-
-        const double mu = 0.3;
-        sim.interactions->contact->set_friction(slope.handler.contact, block.handler.contact, mu);
-
-        const double settle_duration = 1.0;
-        const double total_duration = settings.execution.end_simulation_time;
-        const double theta_rad = theta_deg * 3.14159265 / 180.0;
-        const double g = 9.81;
-
-        {
-            std::string dir = sim.get_settings().output.output_directory;
-            std::ofstream f(dir + "/velocity.csv", std::ios::trunc);
-            f << "t,phase,theta,v_x,v_y,v_z\n";
-        }
-
-        sim.add_time_event(0.0, total_duration, [&sim,
-                                                 block_rb = block.handler.rigidbody,
-                                                 settle_duration,
-                                                 theta_deg,
-                                                 theta_rad,
-                                                 g](double t) {
-            int phase = 0;
-            double gx = 0.0;
-            if (t >= settle_duration) {
-                phase = 1;
-                gx = g * std::sin(theta_rad);
-            }
-            const double gz = -g * std::cos(theta_rad);
-            sim.set_gravity({gx, 0.0, gz});
-
-            std::string dir = sim.get_settings().output.output_directory;
-            std::ofstream f(dir + "/velocity.csv", std::ios::app);
-            Eigen::Vector3d v = block_rb.get_velocity();
-            f << t << "," << phase << "," << theta_deg << "," << v[0] << "," << v[1] << "," << v[2] << "\n";
-        });
-
-        sim.run();
-    };
-
-    run_exp3_case("theta12", 12.0);
-    run_exp3_case("theta20", 20.0);
-}
-
 // --- Exp 4: Coupled Joints & Impacts ---
 void exp4_coupled_joints_and_impacts() {
     std::cout << "Running Exp 4: Coupled Joints & Impacts..." << std::endl;
+    const bool joint_al_enabled = env_flag("STARK_JOINT_AL_ENABLED", false);
+    const std::string run_name = joint_al_enabled ? "exp4_coupled_joints_al" : "exp4_coupled_joints";
     stark::Settings settings;
-    settings.output.simulation_name = "exp4_coupled_joints";
-    settings.output.output_directory = kOutputBase + "/exp4_coupled_joints";
+    settings.output.simulation_name = run_name;
+    settings.output.output_directory = kOutputBase + "/" + run_name;
     settings.output.codegen_directory = kCodegenDir;
     settings.debug.symx_suppress_compiler_output = false;
     settings.debug.symx_force_load = false;
     settings.execution.end_simulation_time = 3.0;
     settings.simulation.init_frictional_contact = true;
+    configure_solver_from_env(settings);
 
     stark::Simulation sim(settings);
+    if (joint_al_enabled) {
+        configure_joint_al_from_env(sim);
+    }
 
     auto c_params = sim.interactions->contact->get_global_params();
     c_params.default_contact_thickness = 0.005;
@@ -432,146 +422,136 @@ void exp5_bolt_from_models()
     sim.run();
 }
 
-void exp6_friction_effect()
+void exp6_double_pendulum()
 {
-    std::cout << "Running Exp 6: Friction Effect on Screw-Nut (mu=0 vs 0.3)..." << std::endl;
+    std::cout << "Running Exp 6: Double Pendulum (STARK)..." << std::endl;
 
-    auto run_exp6_case = [](const std::string& case_name, const double mu) {
-        stark::Settings settings;
-        settings.output.simulation_name = "exp6_" + case_name;
-        settings.output.output_directory = kOutputBase + "/exp6_" + case_name;
-        settings.output.codegen_directory = kCodegenDir;
-        settings.debug.symx_suppress_compiler_output = false;
-        settings.debug.symx_force_load = false;
-        settings.execution.end_simulation_time = 5.0;
-        settings.simulation.init_frictional_contact = true;
-        settings.simulation.max_time_step_size = 0.01;
+    const double exp6_end_time = env_double("STARK_EXP6_END_TIME", 2.0);
+    const double exp6_dt = env_double("STARK_EXP6_DT", 1e-3);
+    const double exp6_joint_stiffness = env_double("STARK_EXP6_JOINT_STIFFNESS", 1e6);
+    const double exp6_joint_tol_m = env_double("STARK_EXP6_JOINT_TOL_M", 1e-4);
+    const double exp6_joint_tol_deg = env_double("STARK_EXP6_JOINT_TOL_DEG", 0.5);
 
-        stark::Simulation sim(settings);
+    stark::Settings settings;
+    settings.output.simulation_name = "exp6_double_pendulum_stark";
+    settings.output.output_directory = kOutputBase + "/exp6_double_pendulum_stark";
+    settings.output.codegen_directory = kCodegenDir;
+    settings.debug.symx_suppress_compiler_output = false;
+    settings.debug.symx_force_load = false;
 
-        auto c_params = sim.interactions->contact->get_global_params();
-        c_params.default_contact_thickness = 1e-4;
-        sim.interactions->contact->set_global_params(c_params);
+    settings.execution.end_simulation_time = exp6_end_time;
+    settings.simulation.gravity = { 0.0, -9.81, 0.0 };
+    settings.simulation.init_frictional_contact = false;
+    settings.simulation.use_adaptive_time_step = false;
+    settings.simulation.max_time_step_size = exp6_dt;
+    settings.newton.residual.tolerance = 1e-6;
+    settings.newton.max_newton_iterations = 80;
 
-        const double density = 8050.0;
-        const double scale = 0.01;
-        stark::ContactParams contact_params;
-        contact_params.contact_thickness = 1e-4;
+    stark::Simulation sim(settings);
+    sim.rigidbodies->set_default_constraint_stiffness(exp6_joint_stiffness);
+    sim.rigidbodies->set_default_constraint_distance_tolerance(exp6_joint_tol_m);
+    sim.rigidbodies->set_default_constraint_angle_tolerance(exp6_joint_tol_deg);
 
-        auto pick_model_path = [](const std::string& file_name) {
-            const std::string abs_path = kModelsDir + "/" + file_name;
-            std::ifstream f(abs_path);
-            if (f.good()) {
-                return abs_path;
+    std::cout << "Exp6 joint stiffness=" << exp6_joint_stiffness
+              << ", tol_m=" << exp6_joint_tol_m
+              << ", tol_deg=" << exp6_joint_tol_deg
+              << ", dt=" << exp6_dt
+              << ", end_time=" << exp6_end_time << std::endl;
+
+    const double L = 1.0;
+    const double W = 0.05;
+    const double link_mass = 1.0;
+
+    stark::ContactParams contact_params;
+    contact_params.contact_thickness = 1e-4;
+
+    auto ground = sim.presets->rigidbodies->add_box("ground", 1.0, { 0.1, 0.1, 0.1 }, contact_params);
+    ground.handler.rigidbody.set_translation({ -0.05, 0.0, 0.0 });
+    sim.rigidbodies->add_constraint_fix(ground.handler.rigidbody).set_label("support_fix");
+
+    auto rod1 = sim.presets->rigidbodies->add_box("rod1", link_mass, { L, W, W }, contact_params);
+    rod1.handler.rigidbody.set_translation({ 0.5 * L, 0.0, 0.0 });
+
+    auto rod2 = sim.presets->rigidbodies->add_box("rod2", link_mass, { L, W, W }, contact_params);
+    rod2.handler.rigidbody.set_translation({ 1.5 * L, 0.0, 0.0 });
+
+    auto support_hinge = sim.rigidbodies->add_constraint_hinge(
+        ground.handler.rigidbody,
+        rod1.handler.rigidbody,
+        { 0.0, 0.0, 0.0 },
+        Eigen::Vector3d::UnitZ());
+    support_hinge.set_label("support_hinge");
+
+    auto middle_hinge = sim.rigidbodies->add_constraint_hinge(
+        rod1.handler.rigidbody,
+        rod2.handler.rigidbody,
+        { L, 0.0, 0.0 },
+        Eigen::Vector3d::UnitZ());
+    middle_hinge.set_label("middle_hinge");
+
+    const double total_mass = rod1.handler.rigidbody.get_mass() + rod2.handler.rigidbody.get_mass();
+    const Eigen::Vector3d gravity = settings.simulation.gravity;
+
+    {
+        std::string dir = sim.get_settings().output.output_directory;
+        std::ofstream f_state(dir + "/double_pendulum_state.csv", std::ios::trunc);
+        f_state << "t,"
+                << "rod1_x,rod1_y,rod1_z,rod1_vx,rod1_vy,rod1_vz,"
+                << "rod2_x,rod2_y,rod2_z,rod2_vx,rod2_vy,rod2_vz,"
+                << "vcm_x,vcm_y,vcm_z\n";
+
+        std::ofstream f_react(dir + "/support_reaction_est.csv", std::ios::trunc);
+        f_react << "t,fx_est,fy_est,fz_est,f_norm,"
+                << "support_point_force_proxy,support_direction_torque_proxy,"
+                << "middle_point_force_proxy,middle_direction_torque_proxy\n";
+    }
+
+    sim.add_time_event(0.0, settings.execution.end_simulation_time,
+        [&sim, rod1 = rod1.handler.rigidbody, rod2 = rod2.handler.rigidbody, support_hinge, middle_hinge, total_mass, gravity,
+         prev_vcm = Eigen::Vector3d(0.0, 0.0, 0.0), prev_t = -1.0](double t) mutable {
+            const Eigen::Vector3d x1 = rod1.get_translation();
+            const Eigen::Vector3d v1 = rod1.get_velocity();
+            const Eigen::Vector3d x2 = rod2.get_translation();
+            const Eigen::Vector3d v2 = rod2.get_velocity();
+            const Eigen::Vector3d vcm = (rod1.get_mass() * v1 + rod2.get_mass() * v2) / total_mass;
+
+            Eigen::Vector3d support_reaction_est = Eigen::Vector3d::Zero();
+            if (prev_t >= 0.0) {
+                const double dt = t - prev_t;
+                if (dt > 1e-12) {
+                    const Eigen::Vector3d acm = (vcm - prev_vcm) / dt;
+                    support_reaction_est = total_mass * (acm - gravity);
+                }
             }
-            return MODELS_PATH + "/" + file_name;
-        };
 
-        auto nut = add_obj_rigidbody(sim, "nut", pick_model_path("nut-big.obj"), density, scale, contact_params);
-        nut.rigidbody.set_translation({0.0, 0.0, 0.0});
-        sim.rigidbodies->add_constraint_fix(nut.rigidbody);
+            const double support_point_force_proxy = support_hinge.get_point_constraint().get_violation_in_m_and_force()[1];
+            const double support_direction_torque_proxy = support_hinge.get_direction_constraint().get_violation_in_deg_and_torque()[1];
+            const double middle_point_force_proxy = middle_hinge.get_point_constraint().get_violation_in_m_and_force()[1];
+            const double middle_direction_torque_proxy = middle_hinge.get_direction_constraint().get_violation_in_deg_and_torque()[1];
 
-        auto screw = add_obj_rigidbody(sim, "screw", pick_model_path("screw-big.obj"), density, scale, contact_params);
-        screw.rigidbody.set_translation({0.0, 0.03, 0.0});
-
-        sim.interactions->contact->set_friction(nut.contact, screw.contact, mu);
-        sim.set_gravity({0.0, -9.81, 0.0});
-
-        {
             std::string dir = sim.get_settings().output.output_directory;
-            std::ofstream f(dir + "/state.csv", std::ios::trunc);
-            f << "t,mu,x,y,z,vx,vy,vz\n";
-        }
+            std::ofstream f_state(dir + "/double_pendulum_state.csv", std::ios::app);
+            f_state << t << ","
+                    << x1.x() << "," << x1.y() << "," << x1.z() << ","
+                    << v1.x() << "," << v1.y() << "," << v1.z() << ","
+                    << x2.x() << "," << x2.y() << "," << x2.z() << ","
+                    << v2.x() << "," << v2.y() << "," << v2.z() << ","
+                    << vcm.x() << "," << vcm.y() << "," << vcm.z() << "\n";
 
-        sim.add_time_event(0.0, settings.execution.end_simulation_time,
-            [&sim, screw_rb = screw.rigidbody, mu](double t) {
-                std::string dir = sim.get_settings().output.output_directory;
-                std::ofstream f(dir + "/state.csv", std::ios::app);
-                const Eigen::Vector3d x = screw_rb.get_translation();
-                const Eigen::Vector3d v = screw_rb.get_velocity();
-                f << t << "," << mu << ","
-                  << x.x() << "," << x.y() << "," << x.z() << ","
-                  << v.x() << "," << v.y() << "," << v.z() << "\n";
-            }
-        );
+            std::ofstream f_react(dir + "/support_reaction_est.csv", std::ios::app);
+            f_react << t << ","
+                    << support_reaction_est.x() << ","
+                    << support_reaction_est.y() << ","
+                    << support_reaction_est.z() << ","
+                    << support_reaction_est.norm() << ","
+                    << support_point_force_proxy << ","
+                    << support_direction_torque_proxy << ","
+                    << middle_point_force_proxy << ","
+                    << middle_direction_torque_proxy << "\n";
 
-        sim.run();
-    };
+            prev_vcm = vcm;
+            prev_t = t;
+        });
 
-    run_exp6_case("mu0", 0.0);
-    run_exp6_case("mu03", 0.3);
-}
-
-void exp7_anchor_cube_kappa_sweep()
-{
-    std::cout << "Running Exp 7: Anchor-Cube adaptive stiffness sweep..." << std::endl;
-
-    auto run_exp7_case = [](const std::string& case_name, const double kappa) {
-        stark::Settings settings;
-        settings.output.simulation_name = "exp7_" + case_name;
-        settings.output.output_directory = kOutputBase + "/exp7_" + case_name;
-        settings.output.codegen_directory = kCodegenDir;
-        settings.debug.symx_suppress_compiler_output = false;
-        settings.debug.symx_force_load = false;
-        settings.execution.end_simulation_time = 0.3;
-        settings.simulation.init_frictional_contact = true;
-        settings.simulation.max_time_step_size = 0.001;
-
-        stark::Simulation sim(settings);
-
-        auto c_params = sim.interactions->contact->get_global_params();
-        c_params.default_contact_thickness = 1e-4;
-        c_params.stiffness_update_enabled = true;
-        c_params.min_contact_stiffness = kappa;
-        sim.interactions->contact->set_global_params(c_params);
-
-        const double density = 8050.0;
-        const double scale = 0.01;
-        stark::ContactParams contact_params;
-        contact_params.contact_thickness = 1e-4;
-
-        auto pick_model_path = [](const std::string& file_name) {
-            const std::string abs_path = kModelsDir + "/" + file_name;
-            std::ifstream f(abs_path);
-            if (f.good()) {
-                return abs_path;
-            }
-            return MODELS_PATH + "/" + file_name;
-        };
-
-        auto cube = add_obj_rigidbody(sim, "cube", pick_model_path("cube.obj"), density, scale, contact_params);
-        cube.rigidbody.set_translation({0.0, 0.0, 0.0});
-        sim.rigidbodies->add_constraint_fix(cube.rigidbody);
-
-        auto anchor = add_obj_rigidbody(sim, "anchor", pick_model_path("anchor.obj"), density, scale, contact_params);
-        anchor.rigidbody.set_translation({0.0, 0.0, 0.0});
-
-        sim.interactions->contact->set_friction(cube.contact, anchor.contact, 0.3);
-        sim.set_gravity({0.0, -9.81, 0.0});
-
-        {
-            std::string dir = sim.get_settings().output.output_directory;
-            std::ofstream f(dir + "/state.csv", std::ios::trunc);
-            f << "t,kappa,x,y,z,vx,vy,vz\n";
-        }
-
-        sim.add_time_event(0.0, settings.execution.end_simulation_time,
-            [&sim, anchor_rb = anchor.rigidbody, kappa](double t) {
-                std::string dir = sim.get_settings().output.output_directory;
-                std::ofstream f(dir + "/state.csv", std::ios::app);
-                const Eigen::Vector3d x = anchor_rb.get_translation();
-                const Eigen::Vector3d v = anchor_rb.get_velocity();
-                f << t << "," << kappa << ","
-                  << x.x() << "," << x.y() << "," << x.z() << ","
-                  << v.x() << "," << v.y() << "," << v.z() << "\n";
-            }
-        );
-
-        sim.run();
-    };
-
-    run_exp7_case("k1e6", 1e6);
-    run_exp7_case("k1e7", 1e7);
-    run_exp7_case("k1e8", 1e8);
-    run_exp7_case("k1e9", 1e9);
+    sim.run();
 }

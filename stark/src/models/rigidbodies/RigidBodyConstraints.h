@@ -4,6 +4,7 @@
 #include <array>
 #include <memory>
 #include <utility>
+#include <limits>
 
 #include <Eigen/Dense>
 #include <symx>
@@ -93,6 +94,9 @@ namespace stark
 			std::vector<Eigen::Vector3d> loc;
 			std::vector<Eigen::Vector3d> target_glob;
 			std::vector<double> stiffness;
+			std::vector<double> al_lambda;
+			std::vector<double> al_rho;
+			std::vector<double> al_prev_violation;
 			std::vector<double> tolerance_in_m;
 			std::vector<double> is_active;
 			std::vector<std::string> labels;
@@ -102,6 +106,9 @@ namespace stark
 				this->loc.push_back(loc);
 				this->target_glob.push_back(target_glob);
 				this->stiffness.push_back(stiffness);
+				this->al_lambda.push_back(0.0);
+				this->al_rho.push_back(stiffness);
+				this->al_prev_violation.push_back(std::numeric_limits<double>::infinity());
 				this->tolerance_in_m.push_back(tolerance_in_m);
 				this->is_active.push_back(1.0);
 				this->labels.push_back("");
@@ -131,6 +138,9 @@ namespace stark
 			std::vector<Eigen::Vector3d> d_loc_rest;
 			std::vector<Eigen::Vector3d> target_d_glob;
 			std::vector<double> stiffness;
+			std::vector<double> al_lambda;
+			std::vector<double> al_rho;
+			std::vector<double> al_prev_violation;
 			std::vector<double> tolerance_in_deg;
 			std::vector<double> is_active;
 			std::vector<std::string> labels;
@@ -142,6 +152,9 @@ namespace stark
 				this->d_loc_rest.push_back(d_loc.normalized());
 				this->target_d_glob.push_back(target_d_glob.normalized());
 				this->stiffness.push_back(stiffness);
+				this->al_lambda.push_back(0.0);
+				this->al_rho.push_back(stiffness);
+				this->al_prev_violation.push_back(std::numeric_limits<double>::infinity());
 				this->tolerance_in_deg.push_back(tolerance_in_deg);
 				this->is_active.push_back(1.0);
 				this->labels.push_back("");
@@ -173,6 +186,9 @@ namespace stark
 			std::vector<Eigen::Vector3d> a_loc;
 			std::vector<Eigen::Vector3d> b_loc;
 			std::vector<double> stiffness;
+			std::vector<double> al_lambda;
+			std::vector<double> al_rho;
+			std::vector<double> al_prev_violation;
 			std::vector<double> tolerance_in_m;
 			std::vector<double> is_active;
 			std::vector<std::string> labels;
@@ -183,6 +199,9 @@ namespace stark
 				this->a_loc.push_back(a_loc);
 				this->b_loc.push_back(b_loc);
 				this->stiffness.push_back(stiffness);
+				this->al_lambda.push_back(0.0);
+				this->al_rho.push_back(stiffness);
+				this->al_prev_violation.push_back(std::numeric_limits<double>::infinity());
 				this->tolerance_in_m.push_back(tolerance_in_m);
 				this->is_active.push_back(1.0);
 				this->labels.push_back("");
@@ -210,6 +229,9 @@ namespace stark
 			std::vector<Eigen::Vector3d> da_loc;
 			std::vector<Eigen::Vector3d> b_loc;
 			std::vector<double> stiffness;
+			std::vector<double> al_lambda;
+			std::vector<double> al_rho;
+			std::vector<double> al_prev_violation;
 			std::vector<double> tolerance_in_m;
 			std::vector<double> is_active;
 			std::vector<std::string> labels;
@@ -220,6 +242,9 @@ namespace stark
 				this->da_loc.push_back(da_loc.normalized());
 				this->b_loc.push_back(b_loc);
 				this->stiffness.push_back(stiffness);
+				this->al_lambda.push_back(0.0);
+				this->al_rho.push_back(stiffness);
+				this->al_prev_violation.push_back(std::numeric_limits<double>::infinity());
 				this->tolerance_in_m.push_back(tolerance_in_m);
 				this->is_active.push_back(1.0);
 				this->labels.push_back("");
@@ -246,6 +271,9 @@ namespace stark
 			std::vector<Eigen::Vector3d> b_loc;
 			std::vector<double> target_distance;
 			std::vector<double> stiffness;
+			std::vector<double> al_lambda;
+			std::vector<double> al_rho;
+			std::vector<double> al_prev_violation;
 			std::vector<double> tolerance_in_m;
 			std::vector<double> is_active;
 			std::vector<std::string> labels;
@@ -257,6 +285,9 @@ namespace stark
 				this->b_loc.push_back(b_loc);
 				this->target_distance.push_back(target_distance);
 				this->stiffness.push_back(stiffness);
+				this->al_lambda.push_back(0.0);
+				this->al_rho.push_back(stiffness);
+				this->al_prev_violation.push_back(std::numeric_limits<double>::infinity());
 				this->tolerance_in_m.push_back(tolerance_in_m);
 				this->is_active.push_back(1.0);
 				this->labels.push_back("");
@@ -286,6 +317,9 @@ namespace stark
 			std::vector<double> min_distance;
 			std::vector<double> max_distance;
 			std::vector<double> stiffness;
+			std::vector<double> al_lambda;
+			std::vector<double> al_rho;
+			std::vector<double> al_prev_violation;
 			std::vector<double> tolerance_in_m;
 			std::vector<double> is_active;
 			std::vector<std::string> labels;
@@ -297,6 +331,9 @@ namespace stark
 				this->min_distance.push_back(min_distance);
 				this->max_distance.push_back(max_distance);
 				this->stiffness.push_back(stiffness);
+				this->al_lambda.push_back(0.0);
+				this->al_rho.push_back(stiffness);
+				this->al_prev_violation.push_back(std::numeric_limits<double>::infinity());
 				this->tolerance_in_m.push_back(tolerance_in_m);
 				this->is_active.push_back(1.0);
 				this->labels.push_back("");
@@ -338,6 +375,9 @@ namespace stark
 			std::vector<Eigen::Vector3d> da_loc;
 			std::vector<Eigen::Vector3d> db_loc;
 			std::vector<double> stiffness;
+			std::vector<double> al_lambda;
+			std::vector<double> al_rho;
+			std::vector<double> al_prev_violation;
 			std::vector<double> tolerance_in_deg;
 			std::vector<double> is_active;
 			std::vector<std::string> labels;
@@ -348,6 +388,9 @@ namespace stark
 				this->da_loc.push_back(da_loc.normalized());
 				this->db_loc.push_back(db_loc.normalized());
 				this->stiffness.push_back(stiffness);
+				this->al_lambda.push_back(0.0);
+				this->al_rho.push_back(stiffness);
+				this->al_prev_violation.push_back(std::numeric_limits<double>::infinity());
 				this->tolerance_in_deg.push_back(tolerance_in_deg);
 				this->is_active.push_back(1.0);
 				this->labels.push_back("");
@@ -383,6 +426,9 @@ namespace stark
 			std::vector<Eigen::Vector3d> db_loc;
 			std::vector<double> max_distance;
 			std::vector<double> stiffness;
+			std::vector<double> al_lambda;
+			std::vector<double> al_rho;
+			std::vector<double> al_prev_violation;
 			std::vector<double> tolerance_in_deg;
 			std::vector<double> is_active;
 			std::vector<std::string> labels;
@@ -393,6 +439,9 @@ namespace stark
 				this->db_loc.push_back(db_loc.normalized());
 				this->max_distance.push_back(max_distance);
 				this->stiffness.push_back(stiffness);
+				this->al_lambda.push_back(0.0);
+				this->al_rho.push_back(stiffness);
+				this->al_prev_violation.push_back(std::numeric_limits<double>::infinity());
 				this->tolerance_in_deg.push_back(tolerance_in_deg);
 				this->is_active.push_back(1.0);
 				this->labels.push_back("");

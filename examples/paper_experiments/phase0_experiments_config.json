@@ -1,0 +1,171 @@
+{
+  "phase": "Phase0",
+  "frozen_on": "2026-03-05",
+  "source_design_docs": [
+    "documents/local/paper1/design/02_execution_plan.md",
+    "documents/local/paper1/design/03_backup_migration_map.md"
+  ],
+  "mvp_scope": [
+    {
+      "id": "A1",
+      "name": "four_bar_closed_loop",
+      "objective": "Validate bilateral joint closure accuracy and long-horizon drift.",
+      "status": "completed_seed_scene_exp4_2026_03_05",
+      "comparison": [
+        "stark_soft_constraint_baseline",
+        "al_ipc_target"
+      ],
+      "artifacts": [
+        "output/paper_experiments/phase0_baseline_minlog.csv",
+        "documents/local/paper1/figs/a1_joint_drift_compare.pdf"
+      ],
+      "scan_ranges": {
+        "delta_t": [
+          0.001,
+          0.0005,
+          0.0002,
+          0.0001
+        ],
+        "rho0": [
+          100.0,
+          1000.0,
+          10000.0
+        ],
+        "rho_update_ratio": [
+          1.2,
+          1.5,
+          2.0
+        ]
+      },
+      "target_thresholds": {
+        "joint_error_max_l2": 0.0001,
+        "contact_gap_min": 0.0
+      }
+    },
+    {
+      "id": "A2",
+      "name": "slider_crank_with_ground_contact",
+      "objective": "Evaluate joint-contact coupling under unified error criteria.",
+      "status": "completed_seed_scene_exp2_2026_03_05",
+      "comparison": [
+        "stark_soft_constraint_baseline",
+        "pychrono_nsc_apgd",
+        "pychrono_smc"
+      ],
+      "artifacts": [
+        "output/paper_experiments/phase0_baseline_minlog.csv",
+        "documents/local/paper1/figs/exp2_impact.pdf"
+      ],
+      "scan_ranges": {
+        "delta_t": [
+          0.001,
+          0.0005,
+          0.0002,
+          0.0001
+        ],
+        "solver_tol": [
+          0.001,
+          0.0001,
+          1e-05
+        ]
+      },
+      "target_thresholds": {
+        "joint_error_max_l2": 0.0001,
+        "contact_gap_min": 0.0
+      }
+    },
+    {
+      "id": "D1",
+      "name": "parameter_sensitivity_baseline",
+      "objective": "Generate error-cost Pareto seeds and failure-rate statistics.",
+      "status": "completed_sweep_exp4_al_2026_03_05",
+      "artifacts": [
+        "output/paper_experiments/d1_parameter_sensitivity.csv",
+        "documents/local/paper1/figs/d1_pareto_total_vs_error.pdf"
+      ],
+      "scan_ranges": {
+        "rho0": [
+          100.0,
+          1000.0,
+          10000.0
+        ],
+        "rho_update_ratio": [
+          1.2,
+          1.5,
+          2.0
+        ],
+        "newton_tol": [
+          0.001,
+          0.0001,
+          1e-05
+        ],
+        "linear_tol": [
+          1.0,
+          0.1,
+          0.01
+        ]
+      }
+    }
+  ],
+  "backup_migration_scope": [
+    "double_stiffness_rule",
+    "exp1_stack20_ablation",
+    "exp2_high_speed_impact",
+    "exp4_coupled_joints",
+    "exp5_bolt_from_models"
+  ],
+  "stark_baseline_runset": [
+    {
+      "id": "D2_seed_stack20",
+      "experiment_arg": "exp1",
+      "expected_output_dirs": [
+        "exp1_adaptive",
+        "exp1_gap_adaptive",
+        "exp1_fixed_soft"
+      ],
+      "purpose": "Seed baseline for stiffness scheduling comparisons."
+    },
+    {
+      "id": "A2_seed_contact",
+      "experiment_arg": "exp2",
+      "expected_output_dirs": [
+        "exp2_v10",
+        "exp2_v100",
+        "exp2_v500"
+      ],
+      "purpose": "Current contact-dominant baseline from high-speed impact."
+    },
+    {
+      "id": "A1_seed_joint_contact",
+      "experiment_arg": "exp4",
+      "expected_output_dirs": [
+        "exp4_coupled_joints"
+      ],
+      "purpose": "MVP A1 representative baseline scene."
+    },
+    {
+      "id": "A5_seed_thread_contact",
+      "experiment_arg": "exp5",
+      "expected_output_dirs": [
+        "exp5_bolt"
+      ],
+      "purpose": "Threaded contact baseline from CAD meshes."
+    }
+  ],
+  "minimal_log_fields": [
+    "total",
+    "time_steps",
+    "newton_iterations",
+    "linear_iterations",
+    "cg_iterations",
+    "hardening_count",
+    "failed_step_count",
+    "line_search_iterations",
+    "failed_step_time",
+    "failed_steps",
+    "line_search",
+    "before_energy_evaluation",
+    "evaluate_e_grad_hess",
+    "write_frame"
+  ]
+}

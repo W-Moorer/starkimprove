@@ -634,10 +634,6 @@ int main(int argc, char** argv)
 		exp2_high_speed_impact();
 		return 0;
 	}
-	if (experiment == "exp3") {
-		exp3_stick_slip_transition();
-		return 0;
-	}
 	if (experiment == "exp4") {
 		exp4_coupled_joints_and_impacts();
 		return 0;
@@ -647,15 +643,10 @@ int main(int argc, char** argv)
 		return 0;
 	}
 	if (experiment == "exp6") {
-		exp6_friction_effect();
+		exp6_double_pendulum();
 		return 0;
 	}
-	if (experiment == "exp7") {
-		exp7_anchor_cube_kappa_sweep();
-		return 0;
-	}
-
-	std::cerr << "Unknown experiment argument: " << experiment << " (use exp1|exp1_adaptive|exp1_gap_adaptive|exp2|exp3|exp4|exp5|exp6|exp7)" << std::endl;
+	std::cerr << "Unknown experiment argument: " << experiment << " (use exp1|exp1_adaptive|exp1_gap_adaptive|exp1_mass_adaptive|exp1_mass_ratio_sweep|exp2|exp4|exp5|exp6)" << std::endl;
 	return 1;
 
 

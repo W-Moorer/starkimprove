@@ -40,7 +40,20 @@ namespace stark
 	class EnergyRigidBodyConstraints
 	{
 	public:
+		struct AugmentedLagrangianParams
+		{
+			bool enabled = false;
+			bool adaptive_rho = false;           // Fixed rho when false
+			double rho0 = 1e5;                   // Default initial rho for all joint constraints
+			double rho_update_ratio = 1.5;       // Multiplicative rho increase for adaptive mode
+			double sufficient_decrease_ratio = 0.9; // Increase rho when violation decrease is insufficient
+			int max_outer_iterations = 8;        // Max AL outer loops before fallback hardening
+			double residual_smoothing = 1e-4;    // Smooth norm residual to avoid singular Hessians at zero violation
+		};
+
         EnergyRigidBodyConstraints(core::Stark& stark, const spRigidBodyDynamics rb);
+		void set_augmented_lagrangian_params(const AugmentedLagrangianParams& params);
+		AugmentedLagrangianParams get_augmented_lagrangian_params() const;
 
         /* Fields */
         const spRigidBodyDynamics rb;
@@ -62,8 +75,20 @@ namespace stark
 		std::shared_ptr<RigidBodyConstraints::AngularVelocity> angular_velocity;
 
 	private:
+		AugmentedLagrangianParams al_params;
+		double al_use_flag = 0.0; // SymX scalar (0/1) used to switch between penalty baseline and AL
+		double al_residual_smoothing_flag = 1e-4; // SymX scalar (>0) used by smooth norm residuals
+		int al_outer_iteration = 0;
+		double last_joint_error_max_l2 = 0.0;
+		double last_joint_error_max_deg = 0.0;
+		int last_joint_violated_constraints = 0;
+		int last_joint_active_constraints = 0;
+
         /* Methods */
 		bool _adjust_constraints_stiffness_and_log(core::Stark& stark, double cap, double multiplier, bool are_positions_set);
+		void _initialize_al_state_if_needed();
+		bool _run_augmented_lagrangian_outer_iteration(core::Stark& stark, bool are_positions_set);
+		void _log_joint_metrics(core::Stark& stark) const;
 
 		// SymX callbacks
 		bool _is_converged_state_valid(core::Stark& stark);
