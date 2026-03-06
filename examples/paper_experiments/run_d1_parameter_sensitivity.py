@@ -29,7 +29,7 @@ from typing import Dict, Iterable, List, Optional
 SCRIPT_PATH = Path(__file__).resolve()
 REPO_ROOT = SCRIPT_PATH.parents[2]
 OUTPUT_BASE = REPO_ROOT / "output" / "paper_experiments"
-EXP4_AL_DIR = OUTPUT_BASE / "exp4_coupled_joints_al"
+EXP4_AL_DIR = OUTPUT_BASE / "exp4_coupled_joints_al_d1"
 DEFAULT_OUT_CSV = OUTPUT_BASE / "d1_parameter_sensitivity.csv"
 LOGGER_GLOB = "logger_*.txt"
 DEFAULT_EXE_CANDIDATES = [
@@ -90,6 +90,7 @@ def parse_logger_metrics(path: Path) -> Dict[str, float]:
 def env_with_case(rho0: float, rho_update_ratio: float, newton_tol: float, linear_tol: float) -> Dict[str, str]:
     env = dict(os.environ)
     env["STARK_JOINT_AL_ENABLED"] = "1"
+    env["STARK_EXP4_RUN_NAME"] = "exp4_coupled_joints_al_d1"
     env["STARK_JOINT_AL_ADAPTIVE_RHO"] = "1"
     env["STARK_JOINT_AL_RHO0"] = f"{rho0:.12g}"
     env["STARK_JOINT_AL_RHO_UPDATE_RATIO"] = f"{rho_update_ratio:.12g}"

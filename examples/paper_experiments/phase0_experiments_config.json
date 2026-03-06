@@ -144,6 +144,17 @@
       "purpose": "MVP A1 representative baseline scene."
     },
     {
+      "id": "A1_seed_joint_contact_al",
+      "experiment_arg": "exp4",
+      "env": {
+        "STARK_JOINT_AL_ENABLED": "1"
+      },
+      "expected_output_dirs": [
+        "exp4_coupled_joints_al"
+      ],
+      "purpose": "MVP A1 AL companion scene bound to single-run logger outputs."
+    },
+    {
       "id": "A5_seed_thread_contact",
       "experiment_arg": "exp5",
       "expected_output_dirs": [

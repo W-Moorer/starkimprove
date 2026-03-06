@@ -47,17 +47,16 @@ stark::EnergyRigidBodyConstraints::EnergyRigidBodyConstraints(stark::core::Stark
 			symx::Vector loc = energy.make_vector(data->loc, conn["idx"]);
 			symx::Vector target_glob = energy.make_vector(data->target_glob, conn["idx"]);
 			symx::Scalar stiffness = energy.make_scalar(data->stiffness, conn["idx"]);
-			symx::Scalar al_lambda = energy.make_scalar(data->al_lambda, conn["idx"]);
+			symx::Vector al_lambda = energy.make_vector(data->al_lambda_vec, conn["idx"]);
 			symx::Scalar al_rho = energy.make_scalar(data->al_rho, conn["idx"]);
 			symx::Scalar is_active = energy.make_scalar(data->is_active, conn["idx"]);
 			symx::Scalar dt = energy.make_scalar(stark.dt);
 			symx::Scalar use_al = energy.make_scalar(this->al_use_flag);
-			symx::Scalar al_eps = energy.make_scalar(this->al_residual_smoothing_flag);
 
 			symx::Vector glob = this->rb->get_x1(energy, conn["rb"], loc, dt);
-			symx::Scalar C = smooth_l2_norm(target_glob - glob, al_eps);
+			symx::Vector u = glob - target_glob;
 			symx::Scalar E_penalty = RigidBodyConstraints::GlobalPoints::energy(stiffness, target_glob, glob);
-			symx::Scalar E_al = al_lambda * C + 0.5 * al_rho * C.powN(2);
+			symx::Scalar E_al = al_lambda.dot(u) + 0.5 * al_rho * u.squared_norm();
 			symx::Scalar E = symx::branch(use_al > 0.5, E_al, E_penalty);
 			energy.set_with_condition(E, is_active > 0.0);
 		}
@@ -95,18 +94,17 @@ stark::EnergyRigidBodyConstraints::EnergyRigidBodyConstraints(stark::core::Stark
 			symx::Vector a_loc = energy.make_vector(data->a_loc, conn["idx"]);
 			symx::Vector b_loc = energy.make_vector(data->b_loc, conn["idx"]);
 			symx::Scalar stiffness = energy.make_scalar(data->stiffness, conn["idx"]);
-			symx::Scalar al_lambda = energy.make_scalar(data->al_lambda, conn["idx"]);
+			symx::Vector al_lambda = energy.make_vector(data->al_lambda_vec, conn["idx"]);
 			symx::Scalar al_rho = energy.make_scalar(data->al_rho, conn["idx"]);
 			symx::Scalar is_active = energy.make_scalar(data->is_active, conn["idx"]);
 			symx::Scalar dt = energy.make_scalar(stark.dt);
 			symx::Scalar use_al = energy.make_scalar(this->al_use_flag);
-			symx::Scalar al_eps = energy.make_scalar(this->al_residual_smoothing_flag);
 
 			symx::Vector a1 = this->rb->get_x1(energy, conn["a"], a_loc, dt);
 			symx::Vector b1 = this->rb->get_x1(energy, conn["b"], b_loc, dt);
-			symx::Scalar C = smooth_l2_norm(b1 - a1, al_eps);
+			symx::Vector u = b1 - a1;
 			symx::Scalar E_penalty = RigidBodyConstraints::Points::energy(stiffness, a1, b1);
-			symx::Scalar E_al = al_lambda * C + 0.5 * al_rho * C.powN(2);
+			symx::Scalar E_al = al_lambda.dot(u) + 0.5 * al_rho * u.squared_norm();
 			symx::Scalar E = symx::branch(use_al > 0.5, E_al, E_penalty);
 			energy.set_with_condition(E, is_active > 0.0);
 		}
@@ -332,9 +330,19 @@ void stark::EnergyRigidBodyConstraints::set_augmented_lagrangian_params(const Au
 				}
 			}
 		};
-		reset(this->global_points);
+		auto reset_vector = [&](auto& data)
+		{
+			for (std::size_t i = 0; i < data->al_lambda_vec.size(); ++i) {
+				data->al_lambda_vec[i].setZero();
+				data->al_prev_violation[i] = std::numeric_limits<double>::infinity();
+				if (this->al_params.rho0 > 0.0) {
+					data->al_rho[i] = this->al_params.rho0;
+				}
+			}
+		};
+		reset_vector(this->global_points);
 		reset(this->global_directions);
-		reset(this->points);
+		reset_vector(this->points);
 		reset(this->point_on_axes);
 		reset(this->distances);
 		reset(this->distance_limits);
@@ -376,10 +384,35 @@ void stark::EnergyRigidBodyConstraints::_initialize_al_state_if_needed()
 			}
 		}
 	};
+	auto ensure_vector = [&](auto& data)
+	{
+		const std::size_t n = data->stiffness.size();
+		if (data->al_lambda.size() != n) {
+			data->al_lambda.resize(n, 0.0);
+		}
+		if (data->al_lambda_vec.size() != n) {
+			data->al_lambda_vec.resize(n, Eigen::Vector3d::Zero());
+		}
+		if (data->al_prev_violation.size() != n) {
+			data->al_prev_violation.resize(n, std::numeric_limits<double>::infinity());
+		}
+		if (data->al_rho.size() < n) {
+			const std::size_t old = data->al_rho.size();
+			data->al_rho.resize(n, 0.0);
+			for (std::size_t i = old; i < n; ++i) {
+				data->al_rho[i] = (this->al_params.rho0 > 0.0) ? this->al_params.rho0 : std::max(1e-12, data->stiffness[i]);
+			}
+		}
+		for (std::size_t i = 0; i < n; ++i) {
+			if (data->al_rho[i] <= 0.0 || !std::isfinite(data->al_rho[i])) {
+				data->al_rho[i] = (this->al_params.rho0 > 0.0) ? this->al_params.rho0 : std::max(1e-12, data->stiffness[i]);
+			}
+		}
+	};
 
-	ensure(this->global_points);
+	ensure_vector(this->global_points);
 	ensure(this->global_directions);
-	ensure(this->points);
+	ensure_vector(this->points);
 	ensure(this->point_on_axes);
 	ensure(this->distances);
 	ensure(this->distance_limits);
@@ -452,6 +485,29 @@ bool stark::EnergyRigidBodyConstraints::_run_augmented_lagrangian_outer_iteratio
 
 		prev_violation = violation;
 	};
+	auto process_vector_equality = [&](const Eigen::Vector3d& u, double tol, double& rho, double& prev_violation, Eigen::Vector3d& lambda)
+	{
+		const double violation = u.norm();
+		max_joint_error_l2 = std::max(max_joint_error_l2, violation);
+
+		if (violation > tol) {
+			is_converged = false;
+			violated_constraints++;
+
+			if (this->al_params.adaptive_rho
+				&& std::isfinite(prev_violation)
+				&& prev_violation > 0.0
+				&& violation > this->al_params.sufficient_decrease_ratio * prev_violation)
+			{
+				rho *= this->al_params.rho_update_ratio;
+				stark.logger.add_to_counter("joint_rho_update_count", 1);
+			}
+
+			lambda += rho * u;
+		}
+
+		prev_violation = violation;
+	};
 
 	// Global points
 	for (int i = 0; i < (int)this->global_points->conn.size(); ++i) {
@@ -461,8 +517,8 @@ bool stark::EnergyRigidBodyConstraints::_run_augmented_lagrangian_outer_iteratio
 		active_constraints++;
 
 		const Eigen::Vector3d p = get_x1(a, data->loc[idx]);
-		auto [C, f] = RigidBodyConstraints::GlobalPoints::violation_in_m_and_force(data->stiffness[idx], data->target_glob[idx], p);
-		process(C, data->tolerance_in_m[idx], false, true, -1.0, data->al_lambda[idx], data->al_rho[idx], data->al_prev_violation[idx]);
+		const Eigen::Vector3d u = p - data->target_glob[idx];
+		process_vector_equality(u, data->tolerance_in_m[idx], data->al_rho[idx], data->al_prev_violation[idx], data->al_lambda_vec[idx]);
 	}
 
 	// Global directions
@@ -488,8 +544,8 @@ bool stark::EnergyRigidBodyConstraints::_run_augmented_lagrangian_outer_iteratio
 
 		const Eigen::Vector3d a1 = get_x1(a, data->a_loc[idx]);
 		const Eigen::Vector3d b1 = get_x1(b, data->b_loc[idx]);
-		auto [C, f] = RigidBodyConstraints::Points::violation_in_m_and_force(data->stiffness[idx], a1, b1);
-		process(C, data->tolerance_in_m[idx], false, true, -1.0, data->al_lambda[idx], data->al_rho[idx], data->al_prev_violation[idx]);
+		const Eigen::Vector3d u = b1 - a1;
+		process_vector_equality(u, data->tolerance_in_m[idx], data->al_rho[idx], data->al_prev_violation[idx], data->al_lambda_vec[idx]);
 	}
 
 	// Point on axis

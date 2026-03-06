@@ -4,6 +4,9 @@ Compare STARK and PyChrono double-pendulum curves:
 - COM displacement curves
 - COM velocity curves
 - support reaction force curves
+
+Support reaction is reconstructed from body kinematics using
+F_support = m1 * (a1 - g) + m2 * (a2 - g).
 """
 
 from __future__ import annotations
@@ -84,11 +87,83 @@ def save_fig(fig: plt.Figure, out_dirs: List[Path], stem: str):
     plt.close(fig)
 
 
-def compare(stark_dir: Path, chrono_dir: Path, compare_dir: Path, fig_dir: Path) -> Dict:
+def moving_average(y: np.ndarray, window: int) -> np.ndarray:
+    window = max(1, int(window))
+    if window % 2 == 0:
+        window += 1
+    if window == 1:
+        return y.copy()
+    pad = window // 2
+    padded = np.pad(y, (pad, pad), mode="edge")
+    kernel = np.ones(window, dtype=float) / float(window)
+    return np.convolve(padded, kernel, mode="valid")
+
+
+def reconstruct_support_reaction_from_state(
+    df_state: pd.DataFrame, rod1_mass: float, rod2_mass: float, gravity: np.ndarray
+) -> pd.DataFrame:
+    t = df_state["t"].to_numpy(dtype=float)
+    if len(t) < 3:
+        raise RuntimeError("Need at least 3 time points to reconstruct reaction from state.")
+
+    v1x = pd.to_numeric(df_state["rod1_vx"], errors="coerce").to_numpy(dtype=float)
+    v1y = pd.to_numeric(df_state["rod1_vy"], errors="coerce").to_numpy(dtype=float)
+    v1z = pd.to_numeric(df_state["rod1_vz"], errors="coerce").to_numpy(dtype=float)
+    v2x = pd.to_numeric(df_state["rod2_vx"], errors="coerce").to_numpy(dtype=float)
+    v2y = pd.to_numeric(df_state["rod2_vy"], errors="coerce").to_numpy(dtype=float)
+    v2z = pd.to_numeric(df_state["rod2_vz"], errors="coerce").to_numpy(dtype=float)
+
+    mask = (
+        np.isfinite(t)
+        & np.isfinite(v1x)
+        & np.isfinite(v1y)
+        & np.isfinite(v1z)
+        & np.isfinite(v2x)
+        & np.isfinite(v2y)
+        & np.isfinite(v2z)
+    )
+    if np.count_nonzero(mask) < 3:
+        raise RuntimeError("Insufficient finite samples to reconstruct support reaction.")
+
+    t = t[mask]
+    v1x = v1x[mask]
+    v1y = v1y[mask]
+    v1z = v1z[mask]
+    v2x = v2x[mask]
+    v2y = v2y[mask]
+    v2z = v2z[mask]
+
+    a1x = np.gradient(v1x, t, edge_order=2)
+    a1y = np.gradient(v1y, t, edge_order=2)
+    a1z = np.gradient(v1z, t, edge_order=2)
+    a2x = np.gradient(v2x, t, edge_order=2)
+    a2y = np.gradient(v2y, t, edge_order=2)
+    a2z = np.gradient(v2z, t, edge_order=2)
+
+    fx = rod1_mass * (a1x - gravity[0]) + rod2_mass * (a2x - gravity[0])
+    fy = rod1_mass * (a1y - gravity[1]) + rod2_mass * (a2y - gravity[1])
+    fz = rod1_mass * (a1z - gravity[2]) + rod2_mass * (a2z - gravity[2])
+    fn = np.sqrt(fx * fx + fy * fy + fz * fz)
+
+    return pd.DataFrame({"t": t, "fx": fx, "fy": fy, "fz": fz, "f_norm": fn})
+
+
+def compare(
+    stark_dir: Path,
+    chrono_dir: Path,
+    compare_dir: Path,
+    fig_dir: Path,
+    rod1_mass: float,
+    rod2_mass: float,
+    gravity: np.ndarray,
+    reaction_smooth_window: int,
+) -> Dict:
     stark_state = read_time_series(stark_dir / "double_pendulum_state.csv")
     chrono_state = read_time_series(chrono_dir / "double_pendulum_state.csv")
-    stark_react = read_time_series(stark_dir / "support_reaction_est.csv")
-    chrono_react = read_time_series(chrono_dir / "support_reaction.csv")
+
+    # Primary reaction source: reconstruct from body kinematics (central differences).
+    stark_react = reconstruct_support_reaction_from_state(stark_state, rod1_mass, rod2_mass, gravity)
+    chrono_react = reconstruct_support_reaction_from_state(chrono_state, rod1_mass, rod2_mass, gravity)
 
     t_min = max(float(stark_state["t"].min()), float(chrono_state["t"].min()))
     t_max = min(float(stark_state["t"].max()), float(chrono_state["t"].max()))
@@ -121,28 +196,20 @@ def compare(stark_dir: Path, chrono_dir: Path, compare_dir: Path, fig_dir: Path)
     c["rod1_speed"] = np.sqrt(c["rod1_vx"] ** 2 + c["rod1_vy"] ** 2)
     c["rod2_speed"] = np.sqrt(c["rod2_vx"] ** 2 + c["rod2_vy"] ** 2)
 
-    react_cols_stark = ["fx_est", "fy_est", "fz_est", "f_norm"]
-    react_cols_chrono = ["fx_joint", "fy_joint", "fz_joint", "f_joint_norm"]
-    sr = interp_on_grid(stark_react, t_grid, react_cols_stark)
-    cr = interp_on_grid(chrono_react, t_grid, react_cols_chrono)
+    react_cols = ["fx", "fy", "fz", "f_norm"]
+    sr = interp_on_grid(stark_react, t_grid, react_cols)
+    cr = interp_on_grid(chrono_react, t_grid, react_cols)
 
-    # Possible sign convention mismatch for joint reaction vector.
-    sign_options = [1.0, -1.0]
-    best_sign = 1.0
-    best_rmse = float("inf")
-    for sign in sign_options:
-        rmse_try = np.sqrt(np.mean((sr["fy_est"] - sign * cr["fy_joint"]) ** 2))
-        if rmse_try < best_rmse:
-            best_rmse = float(rmse_try)
-            best_sign = sign
-    cr_fx = best_sign * cr["fx_joint"]
-    cr_fy = best_sign * cr["fy_joint"]
-    cr_fz = best_sign * cr["fz_joint"]
+    sr_fy_smooth = moving_average(sr["fy"], reaction_smooth_window)
+    cr_fy_smooth = moving_average(cr["fy"], reaction_smooth_window)
+    sr_fn_smooth = moving_average(sr["f_norm"], reaction_smooth_window)
+    cr_fn_smooth = moving_average(cr["f_norm"], reaction_smooth_window)
 
     metrics = {
         "generated_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "time_window": {"t_min": float(t_grid[0]), "t_max": float(t_grid[-1]), "num_samples": int(len(t_grid))},
-        "reaction_sign_applied_to_pychrono": best_sign,
+        "support_reaction_source": "state_reconstruction_central_difference",
+        "support_reaction_display_smoothing_window": int(max(1, reaction_smooth_window)),
         "displacement": {
             "rod1_x": compute_error(s["rod1_x_disp"], c["rod1_x_disp"]).to_dict(),
             "rod1_y": compute_error(s["rod1_y_disp"], c["rod1_y_disp"]).to_dict(),
@@ -154,10 +221,10 @@ def compare(stark_dir: Path, chrono_dir: Path, compare_dir: Path, fig_dir: Path)
             "rod2": compute_error(s["rod2_speed"], c["rod2_speed"]).to_dict(),
         },
         "support_reaction": {
-            "fx": compute_error(sr["fx_est"], cr_fx).to_dict(),
-            "fy": compute_error(sr["fy_est"], cr_fy).to_dict(),
-            "fz": compute_error(sr["fz_est"], cr_fz).to_dict(),
-            "norm": compute_error(sr["f_norm"], cr["f_joint_norm"]).to_dict(),
+            "fx": compute_error(sr["fx"], cr["fx"]).to_dict(),
+            "fy": compute_error(sr["fy"], cr["fy"]).to_dict(),
+            "fz": compute_error(sr["fz"], cr["fz"]).to_dict(),
+            "norm": compute_error(sr["f_norm"], cr["f_norm"]).to_dict(),
         },
     }
 
@@ -221,13 +288,13 @@ def compare(stark_dir: Path, chrono_dir: Path, compare_dir: Path, fig_dir: Path)
     fig, axs = plt.subplots(2, 1, figsize=(7, 6), sharex=True)
     for ax in axs:
         setup_axes(ax)
-    axs[0].plot(t_grid, sr["fy_est"], label="STARK est Fy")
-    axs[0].plot(t_grid, cr_fy, "--", label="PyChrono hinge Fy")
+    axs[0].plot(t_grid, sr_fy_smooth, color="tab:blue", linewidth=1.6, label="STARK reconstructed Fy")
+    axs[0].plot(t_grid, cr_fy_smooth, "--", color="tab:orange", linewidth=1.6, label="PyChrono reconstructed Fy")
     axs[0].set_ylabel("Fy (N)")
-    axs[0].set_title("Support Reaction Force")
+    axs[0].set_title("Support Reaction Force (Reconstructed from State)")
     axs[0].legend()
-    axs[1].plot(t_grid, sr["f_norm"], label="STARK est |F|")
-    axs[1].plot(t_grid, cr["f_joint_norm"], "--", label="PyChrono hinge |F|")
+    axs[1].plot(t_grid, sr_fn_smooth, color="tab:blue", linewidth=1.6, label="STARK reconstructed |F|")
+    axs[1].plot(t_grid, cr_fn_smooth, "--", color="tab:orange", linewidth=1.6, label="PyChrono reconstructed |F|")
     axs[1].set_ylabel("|F| (N)")
     axs[1].set_xlabel("Time (s)")
     axs[1].legend()
@@ -250,10 +317,10 @@ def compare(stark_dir: Path, chrono_dir: Path, compare_dir: Path, fig_dir: Path)
             "rod1_speed_pychrono": c["rod1_speed"],
             "rod2_speed_stark": s["rod2_speed"],
             "rod2_speed_pychrono": c["rod2_speed"],
-            "support_fy_stark": sr["fy_est"],
-            "support_fy_pychrono": cr_fy,
-            "support_fnorm_stark": sr["f_norm"],
-            "support_fnorm_pychrono": cr["f_joint_norm"],
+            "support_fy_stark_reconstructed": sr["fy"],
+            "support_fy_pychrono_reconstructed": cr["fy"],
+            "support_fnorm_stark_reconstructed": sr["f_norm"],
+            "support_fnorm_pychrono_reconstructed": cr["f_norm"],
         }
     ).to_csv(compare_dir / "aligned_curves.csv", index=False)
 
@@ -270,6 +337,22 @@ def parse_args() -> argparse.Namespace:
         "--compare-dir", type=Path, default=DEFAULT_COMPARE_DIR, help=f"Comparison output dir (default: {DEFAULT_COMPARE_DIR})"
     )
     parser.add_argument("--fig-dir", type=Path, default=DEFAULT_FIG_DIR, help=f"Figure output dir (default: {DEFAULT_FIG_DIR})")
+    parser.add_argument("--rod1-mass", type=float, default=1.0, help="Rod1 mass used for reaction reconstruction.")
+    parser.add_argument("--rod2-mass", type=float, default=1.0, help="Rod2 mass used for reaction reconstruction.")
+    parser.add_argument(
+        "--gravity",
+        type=float,
+        nargs=3,
+        default=[0.0, -9.81, 0.0],
+        metavar=("GX", "GY", "GZ"),
+        help="Gravity vector used for reaction reconstruction.",
+    )
+    parser.add_argument(
+        "--reaction-smooth-window",
+        type=int,
+        default=11,
+        help="Odd moving-average window used only for support-reaction display curves.",
+    )
     return parser.parse_args()
 
 
@@ -280,6 +363,10 @@ def main() -> int:
         chrono_dir=args.chrono_dir.resolve(),
         compare_dir=args.compare_dir.resolve(),
         fig_dir=args.fig_dir.resolve(),
+        rod1_mass=float(args.rod1_mass),
+        rod2_mass=float(args.rod2_mass),
+        gravity=np.asarray(args.gravity, dtype=float),
+        reaction_smooth_window=int(args.reaction_smooth_window),
     )
     print(f"Wrote: {args.compare_dir.resolve() / 'summary.json'}")
     print(f"Wrote: {args.compare_dir.resolve() / 'aligned_curves.csv'}")

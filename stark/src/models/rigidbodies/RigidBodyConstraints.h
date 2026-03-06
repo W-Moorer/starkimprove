@@ -95,6 +95,7 @@ namespace stark
 			std::vector<Eigen::Vector3d> target_glob;
 			std::vector<double> stiffness;
 			std::vector<double> al_lambda;
+			std::vector<Eigen::Vector3d> al_lambda_vec;
 			std::vector<double> al_rho;
 			std::vector<double> al_prev_violation;
 			std::vector<double> tolerance_in_m;
@@ -107,6 +108,7 @@ namespace stark
 				this->target_glob.push_back(target_glob);
 				this->stiffness.push_back(stiffness);
 				this->al_lambda.push_back(0.0);
+				this->al_lambda_vec.push_back(Eigen::Vector3d::Zero());
 				this->al_rho.push_back(stiffness);
 				this->al_prev_violation.push_back(std::numeric_limits<double>::infinity());
 				this->tolerance_in_m.push_back(tolerance_in_m);
@@ -187,6 +189,7 @@ namespace stark
 			std::vector<Eigen::Vector3d> b_loc;
 			std::vector<double> stiffness;
 			std::vector<double> al_lambda;
+			std::vector<Eigen::Vector3d> al_lambda_vec;
 			std::vector<double> al_rho;
 			std::vector<double> al_prev_violation;
 			std::vector<double> tolerance_in_m;
@@ -200,6 +203,7 @@ namespace stark
 				this->b_loc.push_back(b_loc);
 				this->stiffness.push_back(stiffness);
 				this->al_lambda.push_back(0.0);
+				this->al_lambda_vec.push_back(Eigen::Vector3d::Zero());
 				this->al_rho.push_back(stiffness);
 				this->al_prev_violation.push_back(std::numeric_limits<double>::infinity());
 				this->tolerance_in_m.push_back(tolerance_in_m);

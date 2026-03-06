@@ -60,6 +60,23 @@ def sanitize_curve(df: pd.DataFrame, x_col: str, y_col: str, max_points: int = 2
     return out
 
 
+def resolve_run_curve(case_dir: Path, curve_stem: str, logger_name: str | None) -> Path:
+    if logger_name:
+        logger_file = Path(logger_name).name
+        if not logger_file.startswith("logger_") or not logger_file.endswith(".txt"):
+            raise ValueError(f"Invalid logger name for {case_dir.name}: {logger_name}")
+        run_file = curve_stem + "_" + logger_file[len("logger_") : -4] + ".csv"
+        run_path = case_dir / run_file
+        if run_path.exists():
+            return run_path
+        raise FileNotFoundError(f"Missing run-specific curve file: {run_path}")
+
+    fallback = case_dir / f"{curve_stem}.csv"
+    if not fallback.exists():
+        raise FileNotFoundError(f"Missing fallback curve file: {fallback}")
+    return fallback
+
+
 def save_fig(fig: plt.Figure, out_dir: Path, stem: str):
     out_dir.mkdir(parents=True, exist_ok=True)
     fig.tight_layout()
@@ -126,11 +143,11 @@ def plot_exp2_impact(data_dir: Path, out_dir: Path):
     save_fig(fig, out_dir, "exp2_impact")
 
 
-def plot_exp4_drift_compare(data_dir: Path, out_dir: Path):
-    base_path = data_dir / "exp4_coupled_joints" / "joint_drift.csv"
-    al_path = data_dir / "exp4_coupled_joints_al" / "joint_drift.csv"
-    if not base_path.exists():
-        raise FileNotFoundError("Missing exp4 baseline joint_drift.csv.")
+def plot_exp4_drift_compare(data_dir: Path, out_dir: Path, base_logger: str | None = None, al_logger: str | None = None):
+    base_dir = data_dir / "exp4_coupled_joints"
+    al_dir = data_dir / "exp4_coupled_joints_al"
+    base_path = resolve_run_curve(base_dir, "joint_drift", base_logger)
+    al_path = resolve_run_curve(al_dir, "joint_drift", al_logger) if al_dir.exists() else None
 
     base_df = sanitize_curve(pd.read_csv(base_path), "t", "max_drift")
     al_df = sanitize_curve(pd.read_csv(al_path), "t", "max_drift") if al_path.exists() else None
@@ -244,11 +261,18 @@ def plot_d1_pareto(d1_csv: Path, out_dir: Path):
     save_fig(fig, out_dir, "d1_pareto_total_vs_error")
 
 
-def run_all(data_dir: Path, out_dir: Path, baseline_csv: Path, d1_csv: Path):
+def run_all(
+    data_dir: Path,
+    out_dir: Path,
+    baseline_csv: Path,
+    d1_csv: Path,
+    exp4_base_logger: str | None = None,
+    exp4_al_logger: str | None = None,
+):
     tasks: List[Tuple[str, Callable[[], None]]] = [
         ("exp1_settling", lambda: plot_exp1_settling(data_dir, out_dir)),
         ("exp2_impact", lambda: plot_exp2_impact(data_dir, out_dir)),
-        ("exp4_drift_compare", lambda: plot_exp4_drift_compare(data_dir, out_dir)),
+        ("exp4_drift_compare", lambda: plot_exp4_drift_compare(data_dir, out_dir, exp4_base_logger, exp4_al_logger)),
         ("exp5_bolt_vs_ref", lambda: plot_exp5_bolt_vs_ref(data_dir, out_dir)),
         ("d2_runtime_breakdown", lambda: plot_d2_runtime(baseline_csv, out_dir)),
         ("d1_pareto_total_vs_error", lambda: plot_d1_pareto(d1_csv, out_dir)),
@@ -284,6 +308,8 @@ def parse_args() -> argparse.Namespace:
         default=DEFAULT_D1_CSV,
         help=f"D1 sweep CSV (default: {DEFAULT_D1_CSV})",
     )
+    parser.add_argument("--exp4-base-logger", type=str, default=None, help="Use a specific exp4 baseline logger file name.")
+    parser.add_argument("--exp4-al-logger", type=str, default=None, help="Use a specific exp4 AL logger file name.")
     return parser.parse_args()
 
 
@@ -294,6 +320,8 @@ def main() -> int:
         out_dir=args.out_dir.resolve(),
         baseline_csv=args.baseline_csv.resolve(),
         d1_csv=args.d1_csv.resolve(),
+        exp4_base_logger=args.exp4_base_logger,
+        exp4_al_logger=args.exp4_al_logger,
     )
     return 0
 

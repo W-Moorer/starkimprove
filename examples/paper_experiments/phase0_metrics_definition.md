@@ -43,7 +43,7 @@ The collector also exports last-row snapshot values from case CSVs when availabl
 
 - `final_time`
 - `final_min_z` (from `min_z.csv`)
-- `final_max_drift` (from `joint_drift.csv`)
+- `final_max_drift` (from the `joint_drift_<simulation>__<timestamp>.csv` matched to `logger_file`, falling back to `joint_drift.csv`)
 - `final_v_x`, `final_v_y`, `final_v_z` (from `velocity.csv`, `impact_state.csv`, `state.csv`, or `screw_state.csv`)
 
 ## Notes

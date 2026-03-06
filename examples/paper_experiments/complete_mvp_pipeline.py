@@ -123,6 +123,27 @@ def summarize_d1(csv_path: Path) -> Dict:
     }
 
 
+def resolve_exp4_loggers(phase0_csv: Path) -> Dict[str, str]:
+    if not phase0_csv.exists():
+        return {}
+    df = pd.read_csv(phase0_csv)
+    if df.empty or "output_dir" not in df.columns or "logger_file" not in df.columns:
+        return {}
+
+    out: Dict[str, str] = {}
+    for output_dir, key in (
+        ("exp4_coupled_joints", "exp4_base_logger"),
+        ("exp4_coupled_joints_al", "exp4_al_logger"),
+    ):
+        subset = df[df["output_dir"].astype(str) == output_dir].copy()
+        if subset.empty:
+            continue
+        if "logger_mtime_utc" in subset.columns:
+            subset = subset.sort_values("logger_mtime_utc")
+        out[key] = str(subset.iloc[-1]["logger_file"])
+    return out
+
+
 def list_generated_figures(fig_dir: Path) -> List[str]:
     if not fig_dir.exists():
         return []
@@ -242,6 +263,8 @@ def main() -> int:
         ]
         run_cmd(d1_cmd, cwd=REPO_ROOT)
 
+    phase0_csv = output_base / PHASE0_CSV.name
+    exp4_loggers = resolve_exp4_loggers(phase0_csv)
     plot_cmd = [
         "python",
         str(PLOTTER),
@@ -250,13 +273,16 @@ def main() -> int:
         "--out-dir",
         str(fig_out),
         "--baseline-csv",
-        str(output_base / PHASE0_CSV.name),
+        str(phase0_csv),
         "--d1-csv",
         str(d1_csv),
     ]
+    if exp4_loggers.get("exp4_base_logger"):
+        plot_cmd += ["--exp4-base-logger", exp4_loggers["exp4_base_logger"]]
+    if exp4_loggers.get("exp4_al_logger"):
+        plot_cmd += ["--exp4-al-logger", exp4_loggers["exp4_al_logger"]]
     run_cmd(plot_cmd, cwd=REPO_ROOT)
 
-    phase0_csv = output_base / PHASE0_CSV.name
     phase0_summary = output_base / PHASE0_SUMMARY_JSON.name
     baseline_summary = summarize_baseline(phase0_csv)
     d1_summary = summarize_d1(d1_csv)

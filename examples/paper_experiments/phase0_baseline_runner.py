@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import os
 import re
 import subprocess
 import sys
@@ -31,6 +32,24 @@ DEFAULT_EXE_CANDIDATES = [
 ]
 LOGGER_GLOB = "logger_*.txt"
 
+FIELD_ALIASES: Dict[str, Tuple[str, ...]] = {
+    "linear_iterations": ("linear_iterations", "cg_iterations"),
+    "cg_iterations": ("cg_iterations", "linear_iterations"),
+    "failed_step_time": ("failed_step_time", "failed_steps"),
+    "failed_steps": ("failed_steps", "failed_step_time"),
+}
+
+ZERO_DEFAULT_FIELDS = {
+    "linear_iterations",
+    "cg_iterations",
+    "hardening_count",
+    "failed_step_count",
+    "line_search_iterations",
+    "failed_step_time",
+    "failed_steps",
+    "line_search",
+}
+
 
 def now_utc_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -41,6 +60,23 @@ def parse_float(text: str) -> Optional[float]:
         return float(text.strip())
     except (TypeError, ValueError):
         return None
+
+
+def parse_float_or_series(text: str) -> Optional[float]:
+    """
+    Parse scalar logger values and legacy comma-separated series.
+    For series values, the last parseable token is used.
+    """
+    direct = parse_float(text)
+    if direct is not None:
+        return direct
+
+    tokens = [tok.strip() for tok in text.split(",")]
+    for tok in reversed(tokens):
+        value = parse_float(tok)
+        if value is not None:
+            return value
+    return None
 
 
 def normalize_key(raw: str) -> str:
@@ -75,6 +111,19 @@ def latest_logger(case_dir: Path) -> Optional[Path]:
     return logger_files[-1]
 
 
+def resolve_run_curve(case_dir: Path, curve_stem: str, logger_name: Optional[str]) -> Optional[Path]:
+    if logger_name:
+        logger_stem = Path(logger_name).stem
+        if logger_stem.startswith("logger_"):
+            run_path = case_dir / f"{curve_stem}_{logger_stem[len('logger_'): ]}.csv"
+            if run_path.exists():
+                return run_path
+    fallback = case_dir / f"{curve_stem}.csv"
+    if fallback.exists():
+        return fallback
+    return None
+
+
 def parse_logger_metrics(path: Path) -> Dict[str, float]:
     metrics: Dict[str, float] = {}
     with path.open("r", encoding="utf-8", errors="ignore") as f:
@@ -83,11 +132,44 @@ def parse_logger_metrics(path: Path) -> Dict[str, float]:
             if ":" not in line:
                 continue
             left, right = line.split(":", 1)
-            value = parse_float(right)
+            value = parse_float_or_series(right)
             if value is None:
                 continue
             metrics[normalize_key(left)] = value
     return metrics
+
+
+def resolve_metric_value(field: str, metrics: Dict[str, float]) -> Optional[float]:
+    key = normalize_key(field)
+
+    # Direct hit first.
+    direct = metrics.get(key)
+    if direct is not None:
+        return direct
+
+    # Canonical backfill for legacy key variants.
+    for alias in FIELD_ALIASES.get(key, ()):
+        value = metrics.get(alias)
+        if value is not None:
+            return value
+
+    # Aggregate hardening count if only split counters are present.
+    if key == "hardening_count":
+        agg = 0.0
+        seen = False
+        for alias in ("contact_hardening_count", "joint_hardening_count", "joint_soft_hardening_count"):
+            value = metrics.get(alias)
+            if value is not None:
+                agg += value
+                seen = True
+        if seen:
+            return agg
+
+    # Counter/timing defaults to zero to keep the min-log schema dense.
+    if key in ZERO_DEFAULT_FIELDS:
+        return 0.0
+
+    return None
 
 
 def read_last_row(path: Path) -> Optional[Dict[str, str]]:
@@ -108,20 +190,19 @@ def maybe_assign_numeric(dst: Dict[str, object], key: str, row: Dict[str, str], 
                 return
 
 
-def collect_snapshot_fields(case_dir: Path) -> Dict[str, object]:
+def collect_snapshot_fields(case_dir: Path, logger_name: Optional[str]) -> Dict[str, object]:
     out: Dict[str, object] = {}
     csv_candidates = [
-        "min_z.csv",
-        "joint_drift.csv",
-        "velocity.csv",
-        "impact_state.csv",
-        "state.csv",
-        "screw_state.csv",
+        case_dir / "min_z.csv",
+        resolve_run_curve(case_dir, "joint_drift", logger_name),
+        case_dir / "velocity.csv",
+        case_dir / "impact_state.csv",
+        case_dir / "state.csv",
+        case_dir / "screw_state.csv",
     ]
 
-    for name in csv_candidates:
-        csv_path = case_dir / name
-        if not csv_path.exists():
+    for csv_path in csv_candidates:
+        if csv_path is None or not csv_path.exists():
             continue
         row = read_last_row(csv_path)
         if not row:
@@ -155,7 +236,10 @@ def run_cases(exe: Path, cases: Iterable[Dict]):
             raise ValueError(f"Case {case_id} missing experiment_arg")
         cmd = [str(exe), str(arg)]
         print(f"[run] {case_id}: {' '.join(cmd)}")
-        result = subprocess.run(cmd, cwd=REPO_ROOT)
+        env = dict(os.environ)
+        for key, value in case.get("env", {}).items():
+            env[str(key)] = str(value)
+        result = subprocess.run(cmd, cwd=REPO_ROOT, env=env)
         if result.returncode != 0:
             raise RuntimeError(f"Case {case_id} failed with exit code {result.returncode}")
 
@@ -203,8 +287,8 @@ def collect_records(
                 "status": "ok",
             }
             for field in min_fields_norm:
-                row[field] = log_metrics.get(field)
-            row.update(collect_snapshot_fields(case_dir))
+                row[field] = resolve_metric_value(field, log_metrics)
+            row.update(collect_snapshot_fields(case_dir, logger.name))
             records.append(row)
     return records, missing
 

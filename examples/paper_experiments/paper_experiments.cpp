@@ -45,6 +45,15 @@ namespace {
         return (parsed > 0) ? parsed : default_value;
     }
 
+    std::string env_string(const char* key, const std::string& default_value)
+    {
+        const char* raw = std::getenv(key);
+        if (raw == nullptr || raw[0] == '\0') {
+            return default_value;
+        }
+        return std::string(raw);
+    }
+
     bool configure_joint_al_from_env(stark::Simulation& sim)
     {
         const bool enabled = env_flag("STARK_JOINT_AL_ENABLED", false);
@@ -301,7 +310,8 @@ void exp2_high_speed_impact() {
 void exp4_coupled_joints_and_impacts() {
     std::cout << "Running Exp 4: Coupled Joints & Impacts..." << std::endl;
     const bool joint_al_enabled = env_flag("STARK_JOINT_AL_ENABLED", false);
-    const std::string run_name = joint_al_enabled ? "exp4_coupled_joints_al" : "exp4_coupled_joints";
+    const std::string default_run_name = joint_al_enabled ? "exp4_coupled_joints_al" : "exp4_coupled_joints";
+    const std::string run_name = env_string("STARK_EXP4_RUN_NAME", default_run_name);
     stark::Settings settings;
     settings.output.simulation_name = run_name;
     settings.output.output_directory = kOutputBase + "/" + run_name;
@@ -328,6 +338,8 @@ void exp4_coupled_joints_and_impacts() {
     stark::RigidBodyHandler prev;
     const int N_chain = 10;
     std::vector<stark::RigidBodyHandler> links;
+    const std::string joint_drift_run_file =
+        "joint_drift_" + settings.output.simulation_name + "__" + settings.output.time_stamp + ".csv";
     
     for (int i = 0; i < N_chain; i++) {
         auto link = sim.presets->rigidbodies->add_box("link_" + std::to_string(i), 1.0, {0.3, 0.1, 0.1});      
@@ -343,10 +355,18 @@ void exp4_coupled_joints_and_impacts() {
         prev = link.handler.rigidbody;
     }
     
-    sim.add_time_event(0.0, 3.0, [&sim, links](double t) {
+    {
         std::string dir = sim.get_settings().output.output_directory;
-        std::ofstream f(dir + "/joint_drift.csv", std::ios::app);
-        if (t == 0.0) f << "t,max_drift\n";
+        std::ofstream f_latest(dir + "/joint_drift.csv", std::ios::trunc);
+        f_latest << "t,max_drift\n";
+        std::ofstream f_run(dir + "/" + joint_drift_run_file, std::ios::trunc);
+        f_run << "t,max_drift\n";
+    }
+
+    sim.add_time_event(0.0, 3.0, [&sim, links, joint_drift_run_file](double t) {
+        std::string dir = sim.get_settings().output.output_directory;
+        std::ofstream f_latest(dir + "/joint_drift.csv", std::ios::app);
+        std::ofstream f_run(dir + "/" + joint_drift_run_file, std::ios::app);
         
         double max_drift = 0.0;
         for (int i = 1; i < (int)links.size(); i++) {
@@ -356,7 +376,8 @@ void exp4_coupled_joints_and_impacts() {
             double drift = (p_prev - p_curr).norm();
             max_drift = std::max(max_drift, drift); 
         }
-        f << t << "," << max_drift << "\n";
+        f_latest << t << "," << max_drift << "\n";
+        f_run << t << "," << max_drift << "\n";
     });
 
     sim.run();
