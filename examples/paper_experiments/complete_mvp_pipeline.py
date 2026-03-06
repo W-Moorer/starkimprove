@@ -123,7 +123,7 @@ def summarize_d1(csv_path: Path) -> Dict:
     }
 
 
-def resolve_exp4_loggers(phase0_csv: Path) -> Dict[str, str]:
+def resolve_exp4_run_selection(phase0_csv: Path) -> Dict[str, str]:
     if not phase0_csv.exists():
         return {}
     df = pd.read_csv(phase0_csv)
@@ -131,16 +131,17 @@ def resolve_exp4_loggers(phase0_csv: Path) -> Dict[str, str]:
         return {}
 
     out: Dict[str, str] = {}
-    for output_dir, key in (
-        ("exp4_coupled_joints", "exp4_base_logger"),
-        ("exp4_coupled_joints_al", "exp4_al_logger"),
+    for case_id, logger_key, dir_key in (
+        ("A1_seed_joint_contact", "exp4_base_logger", "exp4_base_dir"),
+        ("A1_seed_joint_contact_al", "exp4_al_logger", "exp4_al_dir"),
     ):
-        subset = df[df["output_dir"].astype(str) == output_dir].copy()
+        subset = df[df["case_id"].astype(str) == case_id].copy()
         if subset.empty:
             continue
         if "logger_mtime_utc" in subset.columns:
             subset = subset.sort_values("logger_mtime_utc")
-        out[key] = str(subset.iloc[-1]["logger_file"])
+        out[logger_key] = str(subset.iloc[-1]["logger_file"])
+        out[dir_key] = str(subset.iloc[-1]["output_dir"])
     return out
 
 
@@ -152,6 +153,8 @@ def list_generated_figures(fig_dir: Path) -> List[str]:
         "exp2_impact",
         "exp4_drift",
         "a1_joint_drift_compare",
+        "a1_chain10_joint_drift_compare",
+        "exp4_chain10_drift",
         "exp5_bolt_vs_ref",
         "d2_runtime_breakdown",
         "d1_pareto_total_vs_error",
@@ -174,7 +177,7 @@ def write_markdown_summary(path: Path, payload: Dict):
     lines.append("")
     lines.append("## Required Scope (A1/A2/D1 + D2)")
     lines.append("")
-    lines.append("- `A1`: represented by `exp4_coupled_joints` (+ `exp4_coupled_joints_al` comparison)")
+    lines.append("- `A1`: represented by refreshed isolated four-bar runs `exp4_fourbar_a1fix_soft` (+ `exp4_fourbar_a1fix_al` comparison)")
     lines.append("- `A2`: represented by `exp2_v10/v100/v500`")
     lines.append("- `D2`: represented by `exp1_adaptive/gap_adaptive/fixed_soft`")
     lines.append("- `D1`: parameter sensitivity from `d1_parameter_sensitivity.csv`")
@@ -264,7 +267,7 @@ def main() -> int:
         run_cmd(d1_cmd, cwd=REPO_ROOT)
 
     phase0_csv = output_base / PHASE0_CSV.name
-    exp4_loggers = resolve_exp4_loggers(phase0_csv)
+    exp4_loggers = resolve_exp4_run_selection(phase0_csv)
     plot_cmd = [
         "python",
         str(PLOTTER),
@@ -281,6 +284,10 @@ def main() -> int:
         plot_cmd += ["--exp4-base-logger", exp4_loggers["exp4_base_logger"]]
     if exp4_loggers.get("exp4_al_logger"):
         plot_cmd += ["--exp4-al-logger", exp4_loggers["exp4_al_logger"]]
+    if exp4_loggers.get("exp4_base_dir"):
+        plot_cmd += ["--exp4-base-dir", exp4_loggers["exp4_base_dir"]]
+    if exp4_loggers.get("exp4_al_dir"):
+        plot_cmd += ["--exp4-al-dir", exp4_loggers["exp4_al_dir"]]
     run_cmd(plot_cmd, cwd=REPO_ROOT)
 
     phase0_summary = output_base / PHASE0_SUMMARY_JSON.name

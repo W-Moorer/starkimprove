@@ -12,6 +12,7 @@ namespace stark
 	// User facing enums
 	enum class ResidualType { Force, Acceleration };
 	enum class LinearSystemSolver { CG, DirectLU };
+	enum class NewtonPreconditioner { Diagonal, BlockDiagonal };
 	struct Residual { ResidualType type; double tolerance; };
 
 	// Wrapper to set SymX compiler
@@ -49,6 +50,7 @@ namespace stark::core
 		{
 			Residual residual = { ResidualType::Acceleration, 1.0 };
 			LinearSystemSolver linear_system_solver = LinearSystemSolver::CG;
+			NewtonPreconditioner preconditioner = NewtonPreconditioner::BlockDiagonal;
 			bool project_to_PD = true;
 
 			int max_newton_iterations = 100;

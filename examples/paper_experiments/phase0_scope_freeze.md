@@ -47,9 +47,10 @@ Phase0 is considered complete when:
 
 ## MVP Completion Snapshot (`2026-03-05`)
 
-Required 8.1 scope (`A1/A2/D1 + D2`) is completed using retained seed scenes:
+Required 8.1 scope (`A1/A2/D1 + D2`) is completed using retained seed scenes plus the refreshed four-bar A1 formal case:
 
-- `A1` -> `exp4_coupled_joints` (+ `exp4_coupled_joints_al` comparison)
+- `A1` -> `exp4_fourbar_a1fix_soft` (+ `exp4_fourbar_a1fix_al` comparison)
+- `A1` seed stress case -> `exp4_coupled_joints` / `exp4_coupled_joints_al`
 - `A2` -> `exp2_v10/v100/v500`
 - `D2` -> `exp1_adaptive/exp1_gap_adaptive/exp1_fixed_soft`
 - `D1` -> `output/paper_experiments/d1_parameter_sensitivity.csv`

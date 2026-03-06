@@ -1,6 +1,6 @@
 {
   "phase": "Phase0",
-  "frozen_on": "2026-03-05",
+  "frozen_on": "2026-03-06",
   "source_design_docs": [
     "documents/local/paper1/design/02_execution_plan.md",
     "documents/local/paper1/design/03_backup_migration_map.md"
@@ -10,7 +10,7 @@
       "id": "A1",
       "name": "four_bar_closed_loop",
       "objective": "Validate bilateral joint closure accuracy and long-horizon drift.",
-      "status": "completed_seed_scene_exp4_2026_03_05",
+      "status": "completed_seed_scene_exp4_refresh_2026_03_06",
       "comparison": [
         "stark_soft_constraint_baseline",
         "al_ipc_target"
@@ -137,22 +137,26 @@
     },
     {
       "id": "A1_seed_joint_contact",
-      "experiment_arg": "exp4",
+      "experiment_arg": "exp4_fourbar",
+      "env": {
+        "STARK_EXP4_RUN_NAME": "exp4_fourbar_a1fix_soft"
+      },
       "expected_output_dirs": [
-        "exp4_coupled_joints"
+        "exp4_fourbar_a1fix_soft"
       ],
-      "purpose": "MVP A1 representative baseline scene."
+      "purpose": "MVP A1 representative four-bar baseline scene (refreshed isolated soft run)."
     },
     {
       "id": "A1_seed_joint_contact_al",
-      "experiment_arg": "exp4",
+      "experiment_arg": "exp4_fourbar",
       "env": {
-        "STARK_JOINT_AL_ENABLED": "1"
+        "STARK_JOINT_AL_ENABLED": "1",
+        "STARK_EXP4_RUN_NAME": "exp4_fourbar_a1fix_al"
       },
       "expected_output_dirs": [
-        "exp4_coupled_joints_al"
+        "exp4_fourbar_a1fix_al"
       ],
-      "purpose": "MVP A1 AL companion scene bound to single-run logger outputs."
+      "purpose": "MVP A1 four-bar AL companion scene bound to refreshed isolated single-run outputs."
     },
     {
       "id": "A5_seed_thread_contact",

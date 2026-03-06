@@ -141,6 +141,7 @@ namespace stark
 			std::vector<Eigen::Vector3d> target_d_glob;
 			std::vector<double> stiffness;
 			std::vector<double> al_lambda;
+			std::vector<Eigen::Vector3d> al_lambda_vec;
 			std::vector<double> al_rho;
 			std::vector<double> al_prev_violation;
 			std::vector<double> tolerance_in_deg;
@@ -155,6 +156,7 @@ namespace stark
 				this->target_d_glob.push_back(target_d_glob.normalized());
 				this->stiffness.push_back(stiffness);
 				this->al_lambda.push_back(0.0);
+				this->al_lambda_vec.push_back(Eigen::Vector3d::Zero());
 				this->al_rho.push_back(stiffness);
 				this->al_prev_violation.push_back(std::numeric_limits<double>::infinity());
 				this->tolerance_in_deg.push_back(tolerance_in_deg);
@@ -172,7 +174,7 @@ namespace stark
 				const double C = u.norm();
 				const Eigen::Vector3d force = -k*C*u/(C + EPS);
 
-				const double angle_deg = rad2deg(std::asin(C));
+				const double angle_deg = rad2deg(2.0 * std::asin(std::clamp(0.5 * C, 0.0, 1.0)));
 				const Eigen::Vector3d torque = d_target.cross(force);
 
 				return { angle_deg, torque.norm() };  // { [deg], [Nm] }
@@ -380,6 +382,7 @@ namespace stark
 			std::vector<Eigen::Vector3d> db_loc;
 			std::vector<double> stiffness;
 			std::vector<double> al_lambda;
+			std::vector<Eigen::Vector3d> al_lambda_vec;
 			std::vector<double> al_rho;
 			std::vector<double> al_prev_violation;
 			std::vector<double> tolerance_in_deg;
@@ -393,6 +396,7 @@ namespace stark
 				this->db_loc.push_back(db_loc.normalized());
 				this->stiffness.push_back(stiffness);
 				this->al_lambda.push_back(0.0);
+				this->al_lambda_vec.push_back(Eigen::Vector3d::Zero());
 				this->al_rho.push_back(stiffness);
 				this->al_prev_violation.push_back(std::numeric_limits<double>::infinity());
 				this->tolerance_in_deg.push_back(tolerance_in_deg);
@@ -411,7 +415,7 @@ namespace stark
 				const double C = u.norm();
 				const Eigen::Vector3d force = k * C * u / (C + EPS);
 
-				const double angle_deg = rad2deg(std::asin(C));
+				const double angle_deg = rad2deg(2.0 * std::asin(std::clamp(0.5 * C, 0.0, 1.0)));
 				const Eigen::Vector3d torque = da.cross(force);
 
 				return { angle_deg, torque.norm() };  // { [deg], [Nm] }
@@ -602,3 +606,4 @@ namespace stark
 		};
 	};
 }
+

@@ -626,6 +626,10 @@ int main(int argc, char** argv)
 		exp1_mass_adaptive_only();
 		return 0;
 	}
+	if (experiment == "exp1_fixed_soft") {
+		exp1_fixed_soft_only();
+		return 0;
+	}
 	if (experiment == "exp1_mass_ratio_sweep") {
 		exp1_mass_ratio_sweep();
 		return 0;
@@ -634,8 +638,20 @@ int main(int argc, char** argv)
 		exp2_high_speed_impact();
 		return 0;
 	}
+	if (experiment == "exp2_slider" || experiment == "exp2_crank_slider") {
+		exp2_crank_slider_impact();
+		return 0;
+	}
+	if (experiment == "exp3" || experiment == "exp3_limit_stop") {
+		exp3_limit_stop_hinge();
+		return 0;
+	}
 	if (experiment == "exp4") {
 		exp4_coupled_joints_and_impacts();
+		return 0;
+	}
+	if (experiment == "exp4_fourbar" || experiment == "exl") {
+		exp4_fourbar_closed_loop();
 		return 0;
 	}
 	if (experiment == "exp5") {
@@ -646,7 +662,7 @@ int main(int argc, char** argv)
 		exp6_double_pendulum();
 		return 0;
 	}
-	std::cerr << "Unknown experiment argument: " << experiment << " (use exp1|exp1_adaptive|exp1_gap_adaptive|exp1_mass_adaptive|exp1_mass_ratio_sweep|exp2|exp4|exp5|exp6)" << std::endl;
+	std::cerr << "Unknown experiment argument: " << experiment << " (use exp1|exp1_adaptive|exp1_gap_adaptive|exp1_mass_adaptive|exp1_fixed_soft|exp1_mass_ratio_sweep|exp2|exp2_slider|exp3|exp4|exp4_fourbar|exp5|exp6)" << std::endl;
 	return 1;
 
 

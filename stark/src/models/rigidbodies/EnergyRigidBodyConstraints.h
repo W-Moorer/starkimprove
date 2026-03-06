@@ -44,7 +44,7 @@ namespace stark
 		{
 			bool enabled = false;
 			bool adaptive_rho = false;           // Fixed rho when false
-			double rho0 = 1e5;                   // Default initial rho for all joint constraints
+			double rho0 = 0.0;                   // <= 0 initializes rho from each constraint stiffness
 			double rho_update_ratio = 1.5;       // Multiplicative rho increase for adaptive mode
 			double sufficient_decrease_ratio = 0.9; // Increase rho when violation decrease is insufficient
 			int max_outer_iterations = 8;        // Max AL outer loops before fallback hardening

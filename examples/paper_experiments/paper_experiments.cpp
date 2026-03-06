@@ -64,7 +64,7 @@ namespace {
         stark::EnergyRigidBodyConstraints::AugmentedLagrangianParams params;
         params.enabled = true;
         params.adaptive_rho = env_flag("STARK_JOINT_AL_ADAPTIVE_RHO", true);
-        params.rho0 = env_double("STARK_JOINT_AL_RHO0", 1e5);
+        params.rho0 = env_double("STARK_JOINT_AL_RHO0", 0.0);
         params.rho_update_ratio = env_double("STARK_JOINT_AL_RHO_UPDATE_RATIO", 1.5);
         params.sufficient_decrease_ratio = env_double("STARK_JOINT_AL_SUFFICIENT_DECREASE_RATIO", 0.9);
         params.max_outer_iterations = env_int("STARK_JOINT_AL_MAX_OUTER", 8);
@@ -79,6 +79,13 @@ namespace {
         settings.newton.residual.tolerance = env_double("STARK_NEWTON_TOL", settings.newton.residual.tolerance);
         settings.newton.cg_tolerance_multiplier = env_double("STARK_LINEAR_TOL", settings.newton.cg_tolerance_multiplier);
         settings.newton.cg_max_iterations_multiplier = env_double("STARK_CG_MAX_IT_MUL", settings.newton.cg_max_iterations_multiplier);
+        const std::string preconditioner = env_string("STARK_NEWTON_PRECONDITIONER", "block_diagonal");
+        if (preconditioner == "diag" || preconditioner == "diagonal" || preconditioner == "DIAGONAL") {
+            settings.newton.preconditioner = stark::NewtonPreconditioner::Diagonal;
+        }
+        else {
+            settings.newton.preconditioner = stark::NewtonPreconditioner::BlockDiagonal;
+        }
     }
 
     std::tuple<std::vector<Eigen::Vector3d>, std::vector<std::array<int, 3>>> load_and_merge_obj_mesh(const std::string& path, double scale_factor)
@@ -139,6 +146,58 @@ namespace {
         const Eigen::Matrix3d inertia = stark::inertia_tensor_box(mass, aabb_size);
         return sim.presets->rigidbodies->add(output_label, mass, inertia, vertices, triangles, contact_params);
     }
+
+    Eigen::Vector3d make_planar_point(double x, double y)
+    {
+        return { x, y, 0.0 };
+    }
+
+    Eigen::Vector3d rotate_planar_vector(double angle_rad, double length)
+    {
+        return { length * std::cos(angle_rad), length * std::sin(angle_rad), 0.0 };
+    }
+
+    std::pair<Eigen::Vector3d, Eigen::Vector3d> circle_circle_intersection_xy(
+        const Eigen::Vector3d& c0,
+        double r0,
+        const Eigen::Vector3d& c1,
+        double r1)
+    {
+        const Eigen::Vector3d d = c1 - c0;
+        const double dist = d.head<2>().norm();
+        if (!(std::isfinite(dist) && dist > 1e-12)) {
+            throw std::runtime_error("Degenerate four-bar geometry: coincident circle centers.");
+        }
+        if (dist > r0 + r1 || dist < std::abs(r0 - r1)) {
+            throw std::runtime_error("Invalid four-bar geometry: circle intersection does not exist.");
+        }
+
+        const double a = (r0 * r0 - r1 * r1 + dist * dist) / (2.0 * dist);
+        const double h_sq = std::max(0.0, r0 * r0 - a * a);
+        const double h = std::sqrt(h_sq);
+
+        const Eigen::Vector2d ex = d.head<2>() / dist;
+        const Eigen::Vector2d ey(-ex.y(), ex.x());
+        const Eigen::Vector2d p2 = c0.head<2>() + a * ex;
+
+        const Eigen::Vector2d upper = p2 + h * ey;
+        const Eigen::Vector2d lower = p2 - h * ey;
+        return { { upper.x(), upper.y(), 0.0 }, { lower.x(), lower.y(), 0.0 } };
+    }
+
+    double planar_angle_deg(const Eigen::Vector3d& from, const Eigen::Vector3d& to)
+    {
+        const Eigen::Vector3d d = to - from;
+        return std::atan2(d.y(), d.x()) * 180.0 / M_PI;
+    }
+
+    struct JointDriftSample
+    {
+        stark::RigidBodyHandler body_a;
+        stark::RigidBodyHandler body_b;
+        Eigen::Vector3d local_point_a = Eigen::Vector3d::Zero();
+        Eigen::Vector3d local_point_b = Eigen::Vector3d::Zero();
+    };
 }
 
 // --- Exp 1: Collision-Free & Stiffness Update ---
@@ -236,6 +295,11 @@ void exp1_mass_adaptive_only() {
     run_exp1_variation("mass_adaptive", true, 1e3, true, true);
 }
 
+void exp1_fixed_soft_only() {
+    std::cout << "Running Exp 1: fixed soft..." << std::endl;
+    run_exp1_variation("fixed_soft", false, 1e4);
+}
+
 void exp1_mass_ratio_sweep() {
     std::cout << "Running Exp 1: mass ratio sweep..." << std::endl;
     const std::vector<double> ratios = {1.0, 10.0, 100.0, 1000.0};
@@ -306,96 +370,609 @@ void exp2_high_speed_impact() {
     run_exp2_variation(500.0);
 }
 
-// --- Exp 4: Coupled Joints & Impacts ---
-void exp4_coupled_joints_and_impacts() {
-    std::cout << "Running Exp 4: Coupled Joints & Impacts..." << std::endl;
+void exp2_crank_slider_impact()
+{
     const bool joint_al_enabled = env_flag("STARK_JOINT_AL_ENABLED", false);
-    const std::string default_run_name = joint_al_enabled ? "exp4_coupled_joints_al" : "exp4_coupled_joints";
-    const std::string run_name = env_string("STARK_EXP4_RUN_NAME", default_run_name);
+    const std::string default_run_name = joint_al_enabled ? "exp2_crank_slider_al" : "exp2_crank_slider_soft";
+    const std::string run_name = env_string("STARK_EXP2_RUN_NAME", default_run_name);
+
+    const double joint_stiffness = env_double("STARK_EXP2_JOINT_STIFFNESS", 1e6);
+    const double joint_tol_m = env_double("STARK_EXP2_JOINT_TOL_M", 1e-4);
+    const double joint_tol_deg = env_double("STARK_EXP2_JOINT_TOL_DEG", 0.1);
+    const double dt = env_double("STARK_EXP2_DT", 0.002);
+    const double end_time = env_double("STARK_EXP2_END_TIME", 1.2);
+    const double motor_w = env_double("STARK_EXP2_MOTOR_W", -3.0);
+    const double motor_max_torque = env_double("STARK_EXP2_MOTOR_MAX_TORQUE", 50.0);
+
     stark::Settings settings;
     settings.output.simulation_name = run_name;
     settings.output.output_directory = kOutputBase + "/" + run_name;
     settings.output.codegen_directory = kCodegenDir;
     settings.debug.symx_suppress_compiler_output = false;
     settings.debug.symx_force_load = false;
-    settings.execution.end_simulation_time = 3.0;
+    settings.execution.end_simulation_time = end_time;
+    settings.simulation.gravity = { 0.0, -9.81, 0.0 };
     settings.simulation.init_frictional_contact = true;
+    settings.simulation.use_adaptive_time_step = false;
+    settings.simulation.max_time_step_size = dt;
     configure_solver_from_env(settings);
 
     stark::Simulation sim(settings);
     if (joint_al_enabled) {
         configure_joint_al_from_env(sim);
     }
+    sim.rigidbodies->set_default_constraint_stiffness(joint_stiffness);
+    sim.rigidbodies->set_default_constraint_distance_tolerance(joint_tol_m);
+    sim.rigidbodies->set_default_constraint_angle_tolerance(joint_tol_deg);
 
     auto c_params = sim.interactions->contact->get_global_params();
-    c_params.default_contact_thickness = 0.005;
+    c_params.default_contact_thickness = env_double("STARK_EXP2_CONTACT_THICKNESS", 1e-3);
     sim.interactions->contact->set_global_params(c_params);
 
-    auto ground = sim.presets->rigidbodies->add_box("ground", 1.0, {10.0, 10.0, 0.1});
-    ground.handler.rigidbody.set_translation({0.0, 0.0, -0.05});
-    sim.rigidbodies->add_constraint_fix(ground.handler.rigidbody);
+    const double link_width = 0.05;
+    const double link_thickness = 0.05;
+    const double link_mass = 1.0;
+    const double crank_length = env_double("STARK_EXP2_CRANK_LENGTH", 0.35);
+    const double coupler_length = env_double("STARK_EXP2_COUPLER_LENGTH", 0.85);
+    const double crank_geom_length = 0.90 * crank_length;
+    const double coupler_geom_length = 0.90 * coupler_length;
+    const double guide_y = env_double("STARK_EXP2_GUIDE_Y", 0.0);
+    const double support_y = env_double("STARK_EXP2_SUPPORT_Y", 0.0);
+    const double stop_face_x = env_double("STARK_EXP2_STOP_FACE_X", 1.28);
+    const double slider_length = env_double("STARK_EXP2_SLIDER_LENGTH", 0.24);
+    const double slider_height = env_double("STARK_EXP2_SLIDER_HEIGHT", 0.18);
+    const double crank_angle_deg = env_double("STARK_EXP2_CRANK_ANGLE_DEG", 60.0);
+    const double crank_angle_rad = crank_angle_deg * M_PI / 180.0;
 
-    stark::RigidBodyHandler prev;
-    const int N_chain = 10;
-    std::vector<stark::RigidBodyHandler> links;
-    const std::string joint_drift_run_file =
-        "joint_drift_" + settings.output.simulation_name + "__" + settings.output.time_stamp + ".csv";
-    
-    for (int i = 0; i < N_chain; i++) {
-        auto link = sim.presets->rigidbodies->add_box("link_" + std::to_string(i), 1.0, {0.3, 0.1, 0.1});      
-        // Position them along X initially
-        link.handler.rigidbody.set_translation({i * 0.35, 0.0, 1.0}); // Gap 0.05
-        links.push_back(link.handler.rigidbody);
-        
-        if (i == 0) {
-            sim.rigidbodies->add_constraint_hinge(ground.handler.rigidbody, link.handler.rigidbody, {0.0, 0.0, 1.0}, Eigen::Vector3d::UnitY());
-        } else {
-            sim.rigidbodies->add_constraint_point(prev, link.handler.rigidbody, {i*0.35 - 0.175, 0.0, 1.0});   
-        }
-        prev = link.handler.rigidbody;
+    const Eigen::Vector3d A = make_planar_point(0.0, support_y);
+    const Eigen::Vector3d B = A + rotate_planar_vector(crank_angle_rad, crank_length);
+    const double dy = guide_y - B.y();
+    const double dx_sq = coupler_length * coupler_length - dy * dy;
+    if (dx_sq <= 0.0) {
+        throw std::runtime_error("Invalid crank-slider geometry: coupler too short for guide line.");
     }
-    
+    const Eigen::Vector3d pin_C = make_planar_point(B.x() + std::sqrt(dx_sq), guide_y);
+    const Eigen::Vector3d slider_center = pin_C + make_planar_point(0.5 * slider_length, 0.0);
+
+    auto support = sim.presets->rigidbodies->add_box("support", 1.0, {0.12, 0.12, 0.12});
+    support.handler.rigidbody.set_translation({ A.x(), A.y() - 0.8, 0.0 });
+    sim.rigidbodies->add_constraint_fix(support.handler.rigidbody).set_label("support_fix");
+
+    const double stop_thickness = 0.08;
+    auto stop = sim.presets->rigidbodies->add_box("stop", 1.0, {stop_thickness, 0.6, 0.12});
+    stop.handler.rigidbody.set_translation({ stop_face_x + 0.5 * stop_thickness, guide_y, 0.0 });
+    sim.rigidbodies->add_constraint_fix(stop.handler.rigidbody).set_label("stop_fix");
+
+    auto crank = sim.presets->rigidbodies->add_box("crank", link_mass, {crank_geom_length, link_width, link_thickness});
+    crank.handler.rigidbody.set_translation(0.5 * (A + B));
+    crank.handler.rigidbody.set_rotation(planar_angle_deg(A, B), Eigen::Vector3d::UnitZ());
+
+    auto coupler = sim.presets->rigidbodies->add_box("coupler", link_mass, {coupler_geom_length, link_width, link_thickness});
+    coupler.handler.rigidbody.set_translation(0.5 * (B + pin_C));
+    coupler.handler.rigidbody.set_rotation(planar_angle_deg(B, pin_C), Eigen::Vector3d::UnitZ());
+
+    auto slider = sim.presets->rigidbodies->add_box("slider", 1.2, {slider_length, slider_height, 0.12});
+    slider.handler.rigidbody.set_translation(slider_center);
+
+    auto support_motor = sim.rigidbodies->add_constraint_motor(
+        support.handler.rigidbody,
+        crank.handler.rigidbody,
+        A,
+        Eigen::Vector3d::UnitZ(),
+        motor_w,
+        motor_max_torque);
+    support_motor.set_label("support_motor");
+    support_motor.set_stiffness(joint_stiffness);
+    support_motor.set_tolerance_in_m(joint_tol_m);
+    support_motor.set_tolerance_in_deg(joint_tol_deg);
+
+    auto crank_coupler_hinge = sim.rigidbodies->add_constraint_hinge(
+        crank.handler.rigidbody,
+        coupler.handler.rigidbody,
+        B,
+        Eigen::Vector3d::UnitZ());
+    crank_coupler_hinge.set_label("crank_coupler_hinge");
+    crank_coupler_hinge.set_stiffness(joint_stiffness);
+    crank_coupler_hinge.set_tolerance_in_m(joint_tol_m);
+    crank_coupler_hinge.set_tolerance_in_deg(joint_tol_deg);
+
+    auto coupler_slider_hinge = sim.rigidbodies->add_constraint_hinge(
+        coupler.handler.rigidbody,
+        slider.handler.rigidbody,
+        pin_C,
+        Eigen::Vector3d::UnitZ());
+    coupler_slider_hinge.set_label("coupler_slider_hinge");
+    coupler_slider_hinge.set_stiffness(joint_stiffness);
+    coupler_slider_hinge.set_tolerance_in_m(joint_tol_m);
+    coupler_slider_hinge.set_tolerance_in_deg(joint_tol_deg);
+
+    auto slider_guide = sim.rigidbodies->add_constraint_prismatic_slider(
+        support.handler.rigidbody,
+        slider.handler.rigidbody,
+        slider_center,
+        Eigen::Vector3d::UnitX());
+    slider_guide.set_label("slider_guide");
+    slider_guide.set_stiffness(joint_stiffness);
+    slider_guide.set_tolerance_in_m(joint_tol_m);
+    slider_guide.set_tolerance_in_deg(joint_tol_deg);
+
+    auto angle_deg = [](const stark::RigidBodyHandler& rb) {
+        const Eigen::Vector3d x_axis = rb.transform_local_to_global_direction(Eigen::Vector3d::UnitX());
+        return std::atan2(x_axis.y(), x_axis.x()) * 180.0 / M_PI;
+    };
+
     {
         std::string dir = sim.get_settings().output.output_directory;
-        std::ofstream f_latest(dir + "/joint_drift.csv", std::ios::trunc);
-        f_latest << "t,max_drift\n";
-        std::ofstream f_run(dir + "/" + joint_drift_run_file, std::ios::trunc);
-        f_run << "t,max_drift\n";
+        std::ofstream f_state(dir + "/crank_slider_state.csv", std::ios::trunc);
+        f_state << "t,slider_cx,slider_cy,slider_vx,slider_vy,crank_theta_deg,coupler_theta_deg,gap_stop\n";
+
+        std::ofstream f_proxy(dir + "/crank_slider_constraint_proxy.csv", std::ios::trunc);
+        f_proxy << "t,"
+                << "support_point_force_proxy,support_direction_torque_proxy,motor_torque_proxy,"
+                << "crank_coupler_point_force_proxy,crank_coupler_direction_torque_proxy,"
+                << "coupler_slider_point_force_proxy,coupler_slider_direction_torque_proxy,"
+                << "guide_axis_force_proxy,guide_long_direction_torque_proxy,guide_orth_direction_torque_proxy\n";
     }
 
-    sim.add_time_event(0.0, 3.0, [&sim, links, joint_drift_run_file](double t) {
-        std::string dir = sim.get_settings().output.output_directory;
-        std::ofstream f_latest(dir + "/joint_drift.csv", std::ios::app);
-        std::ofstream f_run(dir + "/" + joint_drift_run_file, std::ios::app);
-        
-        double max_drift = 0.0;
-        for (int i = 1; i < (int)links.size(); i++) {
-            // Anchor point in local coords
-            Eigen::Vector3d p_prev = links[i-1].transform_local_to_global_point({0.175, 0.0, 0.0});
-            Eigen::Vector3d p_curr = links[i].transform_local_to_global_point({-0.175, 0.0, 0.0});
-            double drift = (p_prev - p_curr).norm();
-            max_drift = std::max(max_drift, drift); 
-        }
-        f_latest << t << "," << max_drift << "\n";
-        f_run << t << "," << max_drift << "\n";
-    });
+    sim.add_time_event(
+        0.0,
+        settings.execution.end_simulation_time,
+        [&sim,
+         stop_face_x,
+         slider_length,
+         crank_rb = crank.handler.rigidbody,
+         coupler_rb = coupler.handler.rigidbody,
+         slider_rb = slider.handler.rigidbody,
+         support_motor,
+         crank_coupler_hinge,
+         coupler_slider_hinge,
+         slider_guide,
+         angle_deg](double t) mutable {
+            std::string dir = sim.get_settings().output.output_directory;
+            const Eigen::Vector3d slider_c = slider_rb.get_translation();
+            const Eigen::Vector3d slider_v = slider_rb.get_velocity();
+            const double gap_stop = stop_face_x - (slider_c.x() + 0.5 * slider_length);
+
+            std::ofstream f_state(dir + "/crank_slider_state.csv", std::ios::app);
+            f_state << t << ","
+                    << slider_c.x() << "," << slider_c.y() << ","
+                    << slider_v.x() << "," << slider_v.y() << ","
+                    << angle_deg(crank_rb) << "," << angle_deg(coupler_rb) << ","
+                    << gap_stop << "\n";
+
+            std::ofstream f_proxy(dir + "/crank_slider_constraint_proxy.csv", std::ios::app);
+            f_proxy << t << ","
+                    << support_motor.get_hinge_joint().get_point_constraint().get_violation_in_m_and_force()[1] << ","
+                    << support_motor.get_hinge_joint().get_direction_constraint().get_violation_in_deg_and_torque()[1] << ","
+                    << support_motor.get_angular_velocity_constraint().get_signed_angular_velocity_violation_in_deg_per_s_and_torque()[1] << ","
+                    << crank_coupler_hinge.get_point_constraint().get_violation_in_m_and_force()[1] << ","
+                    << crank_coupler_hinge.get_direction_constraint().get_violation_in_deg_and_torque()[1] << ","
+                    << coupler_slider_hinge.get_point_constraint().get_violation_in_m_and_force()[1] << ","
+                    << coupler_slider_hinge.get_direction_constraint().get_violation_in_deg_and_torque()[1] << ","
+                    << slider_guide.get_slider().get_point_on_axis().get_violation_in_m_and_force()[1] << ","
+                    << slider_guide.get_slider().get_direction_lock().get_violation_in_deg_and_torque()[1] << ","
+                    << slider_guide.get_direction_lock().get_violation_in_deg_and_torque()[1] << "\n";
+        });
 
     sim.run();
+}
+
+void exp3_limit_stop_hinge()
+{
+    const bool joint_al_enabled = env_flag("STARK_JOINT_AL_ENABLED", false);
+    const std::string default_run_name = joint_al_enabled ? "exp3_limit_stop_al" : "exp3_limit_stop_soft";
+    const std::string run_name = env_string("STARK_EXP3_RUN_NAME", default_run_name);
+
+    const double joint_stiffness = env_double("STARK_EXP3_JOINT_STIFFNESS", 1e6);
+    const double joint_tol_m = env_double("STARK_EXP3_JOINT_TOL_M", 1e-4);
+    const double joint_tol_deg = env_double("STARK_EXP3_JOINT_TOL_DEG", 0.1);
+    const double dt = env_double("STARK_EXP3_DT", 1e-3);
+    const double end_time = env_double("STARK_EXP3_END_TIME", 2.0);
+    const double limit_angle_deg = env_double("STARK_EXP3_LIMIT_DEG", 35.0);
+
+    stark::Settings settings;
+    settings.output.simulation_name = run_name;
+    settings.output.output_directory = kOutputBase + "/" + run_name;
+    settings.output.codegen_directory = kCodegenDir;
+    settings.debug.symx_suppress_compiler_output = false;
+    settings.debug.symx_force_load = false;
+    settings.execution.end_simulation_time = end_time;
+    settings.simulation.gravity = { 0.0, -9.81, 0.0 };
+    settings.simulation.init_frictional_contact = false;
+    settings.simulation.use_adaptive_time_step = false;
+    settings.simulation.max_time_step_size = dt;
+    configure_solver_from_env(settings);
+
+    stark::Simulation sim(settings);
+    if (joint_al_enabled) {
+        configure_joint_al_from_env(sim);
+    }
+    sim.rigidbodies->set_default_constraint_stiffness(joint_stiffness);
+    sim.rigidbodies->set_default_constraint_distance_tolerance(joint_tol_m);
+    sim.rigidbodies->set_default_constraint_angle_tolerance(joint_tol_deg);
+
+    const double rod_length = env_double("STARK_EXP3_ROD_LENGTH", 1.0);
+    const double rod_width = env_double("STARK_EXP3_ROD_WIDTH", 0.06);
+    const double rod_thickness = env_double("STARK_EXP3_ROD_THICKNESS", 0.06);
+    const double rod_mass = env_double("STARK_EXP3_ROD_MASS", 1.0);
+    const Eigen::Vector3d pivot = make_planar_point(0.0, 0.0);
+
+    auto support = sim.presets->rigidbodies->add_box("support", 1.0, { 0.12, 0.12, 0.12 });
+    support.handler.rigidbody.set_translation({ -0.06, 0.0, 0.0 });
+    sim.rigidbodies->add_constraint_fix(support.handler.rigidbody).set_label("support_fix");
+
+    auto rod = sim.presets->rigidbodies->add_box("rod", rod_mass, { rod_length, rod_width, rod_thickness });
+    rod.handler.rigidbody.set_translation(make_planar_point(0.5 * rod_length, 0.0));
+    rod.handler.rigidbody.set_rotation(0.0, Eigen::Vector3d::UnitZ());
+    rod.handler.rigidbody.set_angular_velocity(Eigen::Vector3d::Zero());
+
+    auto hinge_stop = sim.rigidbodies->add_constraint_hinge_with_angle_limit(
+        support.handler.rigidbody,
+        rod.handler.rigidbody,
+        pivot,
+        Eigen::Vector3d::UnitZ(),
+        limit_angle_deg);
+    hinge_stop.set_label("support_limit_hinge");
+    hinge_stop.set_stiffness(joint_stiffness);
+    hinge_stop.set_tolerance_in_m(joint_tol_m);
+    hinge_stop.set_tolerance_in_deg(joint_tol_deg);
+
+    auto angle_deg = [](const stark::RigidBodyHandler& rb) {
+        const Eigen::Vector3d x_axis = rb.transform_local_to_global_direction(Eigen::Vector3d::UnitX());
+        return std::atan2(x_axis.y(), x_axis.x()) * 180.0 / M_PI;
+    };
+
+    {
+        std::string dir = sim.get_settings().output.output_directory;
+        std::ofstream f_state(dir + "/limit_stop_state.csv", std::ios::trunc);
+        f_state << "t,theta_deg,omega_deg_s,tip_x,tip_y,"
+                << "limit_violation_deg,limit_torque_proxy,"
+                << "support_point_force_proxy,support_direction_torque_proxy\n";
+    }
+
+    sim.add_time_event(
+        0.0,
+        settings.execution.end_simulation_time,
+        [&sim,
+         rod_rb = rod.handler.rigidbody,
+         hinge_stop,
+         rod_length,
+         angle_deg](double t) mutable {
+            const double theta_deg = angle_deg(rod_rb);
+            const double omega_deg_s = rod_rb.get_angular_velocity().z() * 180.0 / M_PI;
+            const Eigen::Vector3d tip = rod_rb.transform_local_to_global_point({ 0.5 * rod_length, 0.0, 0.0 });
+            const auto limit_metrics = hinge_stop.get_angle_limit().get_violation_in_deg_and_torque();
+            const double support_point_force_proxy = hinge_stop.get_hinge_joint().get_point_constraint().get_violation_in_m_and_force()[1];
+            const double support_direction_torque_proxy = hinge_stop.get_hinge_joint().get_direction_constraint().get_violation_in_deg_and_torque()[1];
+
+            std::string dir = sim.get_settings().output.output_directory;
+            std::ofstream f_state(dir + "/limit_stop_state.csv", std::ios::app);
+            f_state << t << ","
+                    << theta_deg << ","
+                    << omega_deg_s << ","
+                    << tip.x() << ","
+                    << tip.y() << ","
+                    << limit_metrics[0] << ","
+                    << limit_metrics[1] << ","
+                    << support_point_force_proxy << ","
+                    << support_direction_torque_proxy << "\n";
+        });
+
+    sim.run();
+}
+
+// --- Exp 4 / Exp 4 Four-Bar: Coupled Joints & Closed Loops ---
+namespace {
+    void run_exp4_scene(bool use_fourbar_scene)
+    {
+    const bool joint_al_enabled = env_flag("STARK_JOINT_AL_ENABLED", false);
+    const std::string default_run_name = use_fourbar_scene
+        ? (joint_al_enabled ? "exp4_fourbar_al" : "exp4_fourbar")
+        : (joint_al_enabled ? "exp4_coupled_joints_al" : "exp4_coupled_joints");
+    const std::string run_name = env_string("STARK_EXP4_RUN_NAME", default_run_name);
+    std::cout << "Running "
+              << (use_fourbar_scene ? "Exp 4 Four-Bar: Closed Loop" : "Exp 4: Coupled Joints & Impacts (10-link chain)")
+              << std::endl;
+    const double exp4_joint_stiffness = env_double("STARK_EXP4_JOINT_STIFFNESS", 1e6);
+    const double exp4_joint_tol_m = env_double("STARK_EXP4_JOINT_TOL_M", 1e-4);
+    const double exp4_joint_tol_deg = env_double("STARK_EXP4_JOINT_TOL_DEG", 0.1);
+    const double exp4_dt = env_double("STARK_EXP4_DT", 0.01);
+    const double exp4_end_time = env_double("STARK_EXP4_END_TIME", 3.0);
+    stark::Settings settings;
+    settings.output.simulation_name = run_name;
+    settings.output.output_directory = kOutputBase + "/" + run_name;
+    settings.output.codegen_directory = kCodegenDir;
+    settings.debug.symx_suppress_compiler_output = false;
+    settings.debug.symx_force_load = false;
+    settings.execution.end_simulation_time = exp4_end_time;
+    settings.simulation.gravity = { 0.0, -9.81, 0.0 };
+    settings.simulation.init_frictional_contact = false;
+    settings.simulation.use_adaptive_time_step = false;
+    settings.simulation.max_time_step_size = exp4_dt;
+    configure_solver_from_env(settings);
+
+    stark::Simulation sim(settings);
+    if (joint_al_enabled) {
+        configure_joint_al_from_env(sim);
+    }
+    sim.rigidbodies->set_default_constraint_stiffness(exp4_joint_stiffness);
+    sim.rigidbodies->set_default_constraint_distance_tolerance(exp4_joint_tol_m);
+    sim.rigidbodies->set_default_constraint_angle_tolerance(exp4_joint_tol_deg);
+
+    const std::string joint_drift_run_file =
+        "joint_drift_" + settings.output.simulation_name + "__" + settings.output.time_stamp + ".csv";
+
+    if (use_fourbar_scene) {
+        const double link_width = 0.06;
+        const double link_thickness = 0.06;
+        const double link_mass = 1.0;
+        const double crank_length = 0.55;
+        const double coupler_length = 1.10;
+        const double rocker_length = 0.95;
+        const double ground_span = 1.40;
+        const double crank_angle_deg = env_double("STARK_EXP4_CRANK_ANGLE_DEG", 55.0);
+        const double crank_angle_rad = crank_angle_deg * M_PI / 180.0;
+
+        const Eigen::Vector3d A = make_planar_point(0.0, 0.0);
+        const Eigen::Vector3d D = make_planar_point(ground_span, 0.0);
+        const Eigen::Vector3d B = A + rotate_planar_vector(crank_angle_rad, crank_length);
+        auto [C_upper, C_lower] = circle_circle_intersection_xy(B, coupler_length, D, rocker_length);
+        const Eigen::Vector3d C = (C_upper.y() >= C_lower.y()) ? C_upper : C_lower;
+
+        auto ground = sim.presets->rigidbodies->add_box("ground", 1.0, {ground_span + 0.2, 0.12, 0.12});
+        ground.handler.rigidbody.set_translation({0.5 * ground_span, 0.0, 0.0});
+        sim.rigidbodies->add_constraint_fix(ground.handler.rigidbody).set_label("ground_fix");
+        const auto ground_rb = ground.handler.rigidbody;
+
+        auto crank = sim.presets->rigidbodies->add_box("crank", link_mass, {crank_length, link_width, link_thickness});
+        crank.handler.rigidbody.set_translation(0.5 * (A + B));
+        crank.handler.rigidbody.set_rotation(planar_angle_deg(A, B), Eigen::Vector3d::UnitZ());
+
+        auto coupler = sim.presets->rigidbodies->add_box("coupler", link_mass, {coupler_length, link_width, link_thickness});
+        coupler.handler.rigidbody.set_translation(0.5 * (B + C));
+        coupler.handler.rigidbody.set_rotation(planar_angle_deg(B, C), Eigen::Vector3d::UnitZ());
+
+        auto rocker = sim.presets->rigidbodies->add_box("rocker", link_mass, {rocker_length, link_width, link_thickness});
+        rocker.handler.rigidbody.set_translation(0.5 * (C + D));
+        rocker.handler.rigidbody.set_rotation(planar_angle_deg(D, C), Eigen::Vector3d::UnitZ());
+
+        auto support_hinge = sim.rigidbodies->add_constraint_hinge(
+            ground_rb,
+            crank.handler.rigidbody,
+            A,
+            Eigen::Vector3d::UnitZ());
+        support_hinge.set_label("support_hinge");
+        support_hinge.set_stiffness(exp4_joint_stiffness);
+        support_hinge.set_tolerance_in_m(exp4_joint_tol_m);
+        support_hinge.set_tolerance_in_deg(exp4_joint_tol_deg);
+
+        auto crank_coupler_hinge = sim.rigidbodies->add_constraint_hinge(
+            crank.handler.rigidbody,
+            coupler.handler.rigidbody,
+            B,
+            Eigen::Vector3d::UnitZ());
+        crank_coupler_hinge.set_label("crank_coupler_hinge");
+        crank_coupler_hinge.set_stiffness(exp4_joint_stiffness);
+        crank_coupler_hinge.set_tolerance_in_m(exp4_joint_tol_m);
+        crank_coupler_hinge.set_tolerance_in_deg(exp4_joint_tol_deg);
+
+        auto coupler_rocker_hinge = sim.rigidbodies->add_constraint_hinge(
+            coupler.handler.rigidbody,
+            rocker.handler.rigidbody,
+            C,
+            Eigen::Vector3d::UnitZ());
+        coupler_rocker_hinge.set_label("coupler_rocker_hinge");
+        coupler_rocker_hinge.set_stiffness(exp4_joint_stiffness);
+        coupler_rocker_hinge.set_tolerance_in_m(exp4_joint_tol_m);
+        coupler_rocker_hinge.set_tolerance_in_deg(exp4_joint_tol_deg);
+
+        auto rocker_support_hinge = sim.rigidbodies->add_constraint_hinge(
+            rocker.handler.rigidbody,
+            ground_rb,
+            D,
+            Eigen::Vector3d::UnitZ());
+        rocker_support_hinge.set_label("rocker_support_hinge");
+        rocker_support_hinge.set_stiffness(exp4_joint_stiffness);
+        rocker_support_hinge.set_tolerance_in_m(exp4_joint_tol_m);
+        rocker_support_hinge.set_tolerance_in_deg(exp4_joint_tol_deg);
+
+        const std::vector<JointDriftSample> joints = {
+            { support_hinge.get_point_constraint().get_body_a(),
+              support_hinge.get_point_constraint().get_body_b(),
+              support_hinge.get_point_constraint().get_local_point_body_a(),
+              support_hinge.get_point_constraint().get_local_point_body_b() },
+            { crank_coupler_hinge.get_point_constraint().get_body_a(),
+              crank_coupler_hinge.get_point_constraint().get_body_b(),
+              crank_coupler_hinge.get_point_constraint().get_local_point_body_a(),
+              crank_coupler_hinge.get_point_constraint().get_local_point_body_b() },
+            { coupler_rocker_hinge.get_point_constraint().get_body_a(),
+              coupler_rocker_hinge.get_point_constraint().get_body_b(),
+              coupler_rocker_hinge.get_point_constraint().get_local_point_body_a(),
+              coupler_rocker_hinge.get_point_constraint().get_local_point_body_b() },
+            { rocker_support_hinge.get_point_constraint().get_body_a(),
+              rocker_support_hinge.get_point_constraint().get_body_b(),
+              rocker_support_hinge.get_point_constraint().get_local_point_body_a(),
+              rocker_support_hinge.get_point_constraint().get_local_point_body_b() },
+        };
+
+        {
+            std::string dir = sim.get_settings().output.output_directory;
+            std::ofstream f_latest(dir + "/joint_drift.csv", std::ios::trunc);
+            f_latest << "t,max_drift\n";
+            std::ofstream f_run(dir + "/" + joint_drift_run_file, std::ios::trunc);
+            f_run << "t,max_drift\n";
+
+            std::ofstream f_state(dir + "/fourbar_state.csv", std::ios::trunc);
+            f_state << "t,"
+                    << "crank_cx,crank_cy,crank_theta_deg,"
+                    << "coupler_cx,coupler_cy,coupler_theta_deg,"
+                    << "rocker_cx,rocker_cy,rocker_theta_deg\n";
+
+            std::ofstream f_proxy(dir + "/fourbar_constraint_proxy.csv", std::ios::trunc);
+            f_proxy << "t,"
+                    << "support_point_force_proxy,support_direction_torque_proxy,"
+                    << "crank_coupler_point_force_proxy,crank_coupler_direction_torque_proxy,"
+                    << "coupler_rocker_point_force_proxy,coupler_rocker_direction_torque_proxy,"
+                    << "rocker_support_point_force_proxy,rocker_support_direction_torque_proxy\n";
+        }
+
+        sim.add_time_event(
+            0.0,
+            settings.execution.end_simulation_time,
+            [&sim,
+             joints,
+             joint_drift_run_file,
+             crank_rb = crank.handler.rigidbody,
+             coupler_rb = coupler.handler.rigidbody,
+             rocker_rb = rocker.handler.rigidbody,
+             support_hinge,
+             crank_coupler_hinge,
+             coupler_rocker_hinge,
+             rocker_support_hinge](double t) mutable {
+            std::string dir = sim.get_settings().output.output_directory;
+            std::ofstream f_latest(dir + "/joint_drift.csv", std::ios::app);
+            std::ofstream f_run(dir + "/" + joint_drift_run_file, std::ios::app);
+            
+            double max_drift = 0.0;
+            for (const auto& joint : joints) {
+                const Eigen::Vector3d pa = joint.body_a.transform_local_to_global_point(joint.local_point_a);
+                const Eigen::Vector3d pb = joint.body_b.transform_local_to_global_point(joint.local_point_b);
+                max_drift = std::max(max_drift, (pa - pb).norm());
+            }
+            f_latest << t << "," << max_drift << "\n";
+            f_run << t << "," << max_drift << "\n";
+
+            auto angle_deg = [](const stark::RigidBodyHandler& rb) {
+                const Eigen::Vector3d x_axis = rb.transform_local_to_global_direction(Eigen::Vector3d::UnitX());
+                return std::atan2(x_axis.y(), x_axis.x()) * 180.0 / M_PI;
+            };
+
+            std::ofstream f_state(dir + "/fourbar_state.csv", std::ios::app);
+            const Eigen::Vector3d crank_c = crank_rb.get_translation();
+            const Eigen::Vector3d coupler_c = coupler_rb.get_translation();
+            const Eigen::Vector3d rocker_c = rocker_rb.get_translation();
+            f_state << t << ","
+                    << crank_c.x() << "," << crank_c.y() << "," << angle_deg(crank_rb) << ","
+                    << coupler_c.x() << "," << coupler_c.y() << "," << angle_deg(coupler_rb) << ","
+                    << rocker_c.x() << "," << rocker_c.y() << "," << angle_deg(rocker_rb) << "\n";
+
+            std::ofstream f_proxy(dir + "/fourbar_constraint_proxy.csv", std::ios::app);
+            f_proxy << t << ","
+                    << support_hinge.get_point_constraint().get_violation_in_m_and_force()[1] << ","
+                    << support_hinge.get_direction_constraint().get_violation_in_deg_and_torque()[1] << ","
+                    << crank_coupler_hinge.get_point_constraint().get_violation_in_m_and_force()[1] << ","
+                    << crank_coupler_hinge.get_direction_constraint().get_violation_in_deg_and_torque()[1] << ","
+                    << coupler_rocker_hinge.get_point_constraint().get_violation_in_m_and_force()[1] << ","
+                    << coupler_rocker_hinge.get_direction_constraint().get_violation_in_deg_and_torque()[1] << ","
+                    << rocker_support_hinge.get_point_constraint().get_violation_in_m_and_force()[1] << ","
+                    << rocker_support_hinge.get_direction_constraint().get_violation_in_deg_and_torque()[1] << "\n";
+        });
+    } else {
+        auto c_params = sim.interactions->contact->get_global_params();
+        c_params.default_contact_thickness = 0.005;
+        sim.interactions->contact->set_global_params(c_params);
+
+        auto ground = sim.presets->rigidbodies->add_box("ground", 1.0, {10.0, 10.0, 0.1});
+        ground.handler.rigidbody.set_translation({0.0, 0.0, -0.05});
+        sim.rigidbodies->add_constraint_fix(ground.handler.rigidbody);
+        const auto ground_rb = ground.handler.rigidbody;
+
+        const int N_chain = 10;
+        std::vector<stark::RigidBodyHandler> links;
+        std::vector<JointDriftSample> joints;
+        stark::RigidBodyHandler prev;
+
+        for (int i = 0; i < N_chain; i++) {
+            auto link = sim.presets->rigidbodies->add_box("link_" + std::to_string(i), 1.0, {0.3, 0.1, 0.1});
+            link.handler.rigidbody.set_translation({ i * 0.35, 0.0, 1.0 });
+            links.push_back(link.handler.rigidbody);
+
+            if (i == 0) {
+                auto hinge = sim.rigidbodies->add_constraint_hinge(
+                    ground_rb,
+                    link.handler.rigidbody,
+                    { 0.0, 0.0, 1.0 },
+                    Eigen::Vector3d::UnitY());
+                hinge.set_stiffness(exp4_joint_stiffness);
+                hinge.set_tolerance_in_m(exp4_joint_tol_m);
+                hinge.set_tolerance_in_deg(exp4_joint_tol_deg);
+                joints.push_back({
+                    hinge.get_point_constraint().get_body_a(),
+                    hinge.get_point_constraint().get_body_b(),
+                    hinge.get_point_constraint().get_local_point_body_a(),
+                    hinge.get_point_constraint().get_local_point_body_b() });
+            } else {
+                auto point = sim.rigidbodies->add_constraint_point(prev, link.handler.rigidbody, { i * 0.35 - 0.175, 0.0, 1.0 });
+                point.set_stiffness(exp4_joint_stiffness);
+                point.set_tolerance_in_m(exp4_joint_tol_m);
+                joints.push_back({
+                    point.get_body_a(),
+                    point.get_body_b(),
+                    point.get_local_point_body_a(),
+                    point.get_local_point_body_b() });
+            }
+            prev = link.handler.rigidbody;
+        }
+
+        {
+            std::string dir = sim.get_settings().output.output_directory;
+            std::ofstream f_latest(dir + "/joint_drift.csv", std::ios::trunc);
+            f_latest << "t,max_drift\n";
+            std::ofstream f_run(dir + "/" + joint_drift_run_file, std::ios::trunc);
+            f_run << "t,max_drift\n";
+        }
+
+        sim.add_time_event(
+            0.0,
+            settings.execution.end_simulation_time,
+            [&sim, joints, joint_drift_run_file](double t) {
+            std::string dir = sim.get_settings().output.output_directory;
+            std::ofstream f_latest(dir + "/joint_drift.csv", std::ios::app);
+            std::ofstream f_run(dir + "/" + joint_drift_run_file, std::ios::app);
+
+            double max_drift = 0.0;
+            for (const auto& joint : joints) {
+                const Eigen::Vector3d pa = joint.body_a.transform_local_to_global_point(joint.local_point_a);
+                const Eigen::Vector3d pb = joint.body_b.transform_local_to_global_point(joint.local_point_b);
+                max_drift = std::max(max_drift, (pa - pb).norm());
+            }
+            f_latest << t << "," << max_drift << "\n";
+            f_run << t << "," << max_drift << "\n";
+        });
+    }
+
+    sim.run();
+    }
+}
+
+void exp4_coupled_joints_and_impacts()
+{
+    run_exp4_scene(false);
+}
+
+void exp4_fourbar_closed_loop()
+{
+    run_exp4_scene(true);
 }
 
 void exp5_bolt_from_models()
 {
     std::cout << "Running Exp 5: Screw-Nut from models OBJ..." << std::endl;
 
+    const std::string run_name = env_string("STARK_EXP5_RUN_NAME", "exp5_bolt");
+    const double end_time = env_double("STARK_EXP5_END_TIME", 5.0);
+    const double dt = env_double("STARK_EXP5_DT", 0.01);
+
     stark::Settings settings;
-    settings.output.simulation_name = "exp5_bolt";
-    settings.output.output_directory = kOutputBase + "/exp5_bolt";
+    settings.output.simulation_name = run_name;
+    settings.output.output_directory = kOutputBase + "/" + run_name;
     settings.output.codegen_directory = kCodegenDir;
     settings.debug.symx_suppress_compiler_output = false;
     settings.debug.symx_force_load = false;
-    settings.execution.end_simulation_time = 5.0;
-    settings.simulation.max_time_step_size = 0.01;
+    settings.execution.end_simulation_time = end_time;
+    settings.simulation.max_time_step_size = dt;
     settings.simulation.init_frictional_contact = true;
+    configure_solver_from_env(settings);
 
     stark::Simulation sim(settings);
 

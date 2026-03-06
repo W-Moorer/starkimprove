@@ -6,8 +6,8 @@ This file freezes the metric vocabulary used by Phase0 so that later A1/A2/D1 ru
 
 | Metric ID | Symbol | Definition | Unit | Phase0 status |
 | --- | --- | --- | --- | --- |
-| `joint_error_max_l2` | `e_g` | `max_t ||g(x_t)||_2` over all accepted time steps. | m | Frozen (A1/A2 completed via seed scenes) |
-| `loop_drift` | `e_drift` | Closed-loop geometric drift at end time or end cycle. | m | Frozen (A1 completed via seed scene) |
+| `joint_error_max_l2` | `e_g` | `max_t ||g(x_t)||_2` over all accepted time steps. | m | Frozen (A1 four-bar formal case + A2 seed case) |
+| `loop_drift` | `e_drift` | Closed-loop geometric drift at end time or end cycle. | m | Frozen (A1 four-bar formal case; 10-link seed retained separately) |
 | `contact_gap_min` | `d_min` | Minimum contact gap over time (`>= 0` means no penetration under current convention). | m | Frozen |
 | `hardening_count` | `N_hard` | Number of contact or joint stiffness hardening events. | count | Frozen |
 | `failed_step_time` | `T_fail` | Wall-time spent in failed/retried time steps. | s | Frozen |
@@ -49,4 +49,4 @@ The collector also exports last-row snapshot values from case CSVs when availabl
 ## Notes
 
 - Phase0 freezes names and formulas, not final performance numbers.
-- As of `2026-03-05`, MVP-required `A1/A2/D1 + D2` are completed with retained seed scenes (`exp1/exp2/exp4`) and exported artifacts (`phase0_baseline_minlog.csv`, `d1_parameter_sensitivity.csv`, figure set in `documents/local/paper1/figs`).
+- As of `2026-03-06`, MVP-required `A1/A2/D1 + D2` are completed with retained seed scenes (`exp1/exp2/exp4`) plus the formal four-bar A1 case (`exp4_fourbar`), and exported artifacts (`phase0_baseline_minlog.csv`, `d1_parameter_sensitivity.csv`, figure set in `documents/local/paper1/figs`).

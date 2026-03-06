@@ -2,7 +2,7 @@
 """
 D1 parameter sensitivity sweep for AL-IPC joint constraints.
 
-This runner drives the existing `exp4` scene through environment variables:
+This runner drives the existing `exp4` 10-link chain scene through environment variables:
 - STARK_JOINT_AL_ENABLED=1
 - STARK_JOINT_AL_RHO0
 - STARK_JOINT_AL_RHO_UPDATE_RATIO

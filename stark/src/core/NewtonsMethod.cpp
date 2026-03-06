@@ -312,7 +312,12 @@ bool stark::core::NewtonsMethod::_solve_linear_system(Eigen::VectorXd& du, const
 		this->du.resize(rhs.size());
 		this->du.setZero();
 		
-		lhs.set_preconditioner(bsm::Preconditioner::BlockDiagonal);
+		if (this->settings->newton.preconditioner == NewtonPreconditioner::Diagonal) {
+			lhs.set_preconditioner(bsm::Preconditioner::Diagonal);
+		}
+		else {
+			lhs.set_preconditioner(bsm::Preconditioner::BlockDiagonal);
+		}
 		lhs.prepare_preconditioning(n_threads);
 		cg::Info info = cg::solve<double>(this->du.data(), rhs.data(), (int)rhs.size(), cg_tol, max_iterations,
 			[&](double* b, const double* x, const int size) { lhs.spmxv_from_ptr(b, x, n_threads);  },

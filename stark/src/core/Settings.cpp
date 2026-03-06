@@ -68,6 +68,15 @@ std::string to_string(LinearSystemSolver v)
 	default: return ""; break;
 	}
 }
+std::string to_string(NewtonPreconditioner v)
+{
+	switch (v)
+	{
+	case NewtonPreconditioner::Diagonal: return "Diagonal"; break;
+	case NewtonPreconditioner::BlockDiagonal: return "BlockDiagonal"; break;
+	default: return ""; break;
+	}
+}
 std::string to_string(const bool v)
 {
 	if (v) {
@@ -117,6 +126,7 @@ std::string Settings::as_string() const
 	out += "\n         residual_type: " + to_string(this->newton.residual.type);
 	out += "\n         newton_tolerance: " + fmt::format("{:.1e}", this->newton.residual.tolerance);
 	out += "\n         linear_system_solver: " + to_string(this->newton.linear_system_solver);
+	out += "\n         preconditioner: " + to_string(this->newton.preconditioner);
 	out += "\n         project_to_PD: " + to_string(this->newton.project_to_PD);
 	out += "\n         max_newton_iterations: " + std::to_string(this->newton.max_newton_iterations);
 	out += "\n         max_line_search_iterations: " + std::to_string(this->newton.max_line_search_iterations);

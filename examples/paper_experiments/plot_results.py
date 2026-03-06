@@ -143,9 +143,20 @@ def plot_exp2_impact(data_dir: Path, out_dir: Path):
     save_fig(fig, out_dir, "exp2_impact")
 
 
-def plot_exp4_drift_compare(data_dir: Path, out_dir: Path, base_logger: str | None = None, al_logger: str | None = None):
-    base_dir = data_dir / "exp4_coupled_joints"
-    al_dir = data_dir / "exp4_coupled_joints_al"
+def plot_joint_drift_compare(
+    data_dir: Path,
+    out_dir: Path,
+    base_logger: str | None = None,
+    al_logger: str | None = None,
+    base_dir_name: str = "exp4_fourbar_a1fix_soft",
+    al_dir_name: str = "exp4_fourbar_a1fix_al",
+    title: str = "A1 Four-Bar: Joint Drift Baseline vs AL",
+    secondary_title: str = "Four-Bar Joint Constraint Accuracy",
+    primary_stem: str = "a1_joint_drift_compare",
+    secondary_stem: str = "exp4_drift",
+):
+    base_dir = data_dir / base_dir_name
+    al_dir = data_dir / al_dir_name
     base_path = resolve_run_curve(base_dir, "joint_drift", base_logger)
     al_path = resolve_run_curve(al_dir, "joint_drift", al_logger) if al_dir.exists() else None
 
@@ -159,9 +170,9 @@ def plot_exp4_drift_compare(data_dir: Path, out_dir: Path, base_logger: str | No
         ax.plot(al_df["t"], 1e3 * al_df["max_drift"], color="#1f77b4", label="AL-IPC")
     ax.set_xlabel("Time (s)")
     ax.set_ylabel("Joint Drift (mm)")
-    ax.set_title("A1 Seed: Joint Drift Baseline vs AL")
+    ax.set_title(title)
     ax.legend()
-    save_fig(fig, out_dir, "a1_joint_drift_compare")
+    save_fig(fig, out_dir, primary_stem)
 
     # Backward-compatible file names
     fig2, ax2 = plt.subplots(figsize=(6, 4))
@@ -169,9 +180,53 @@ def plot_exp4_drift_compare(data_dir: Path, out_dir: Path, base_logger: str | No
     ax2.plot(base_df["t"], 1e3 * base_df["max_drift"], color="#e377c2", label="Max Constraint Violation")
     ax2.set_xlabel("Time (s)")
     ax2.set_ylabel("Joint Drift (mm)")
-    ax2.set_title("Coupled Joints Constraint Accuracy")
+    ax2.set_title(secondary_title)
     ax2.legend()
-    save_fig(fig2, out_dir, "exp4_drift")
+    save_fig(fig2, out_dir, secondary_stem)
+
+
+def plot_exp4_drift_compare(
+    data_dir: Path,
+    out_dir: Path,
+    base_logger: str | None = None,
+    al_logger: str | None = None,
+    base_dir_name: str = "exp4_fourbar_a1fix_soft",
+    al_dir_name: str = "exp4_fourbar_a1fix_al",
+):
+    plot_joint_drift_compare(
+        data_dir,
+        out_dir,
+        base_logger,
+        al_logger,
+        base_dir_name,
+        al_dir_name,
+        title="A1 Four-Bar: Joint Drift Baseline vs AL",
+        secondary_title="Four-Bar Joint Constraint Accuracy",
+        primary_stem="a1_joint_drift_compare",
+        secondary_stem="exp4_drift",
+    )
+
+
+def plot_exp4_chain10_supplement(
+    data_dir: Path,
+    out_dir: Path,
+    base_logger: str | None = None,
+    al_logger: str | None = None,
+    base_dir_name: str = "exp4_chain10_supp_soft",
+    al_dir_name: str = "exp4_chain10_supp_al",
+):
+    plot_joint_drift_compare(
+        data_dir,
+        out_dir,
+        base_logger,
+        al_logger,
+        base_dir_name,
+        al_dir_name,
+        title="A1 Supplement: 10-Link Chain Drift",
+        secondary_title="10-Link Chain Constraint Accuracy",
+        primary_stem="a1_chain10_joint_drift_compare",
+        secondary_stem="exp4_chain10_drift",
+    )
 
 
 def plot_exp5_bolt_vs_ref(data_dir: Path, out_dir: Path):
@@ -268,11 +323,38 @@ def run_all(
     d1_csv: Path,
     exp4_base_logger: str | None = None,
     exp4_al_logger: str | None = None,
+    exp4_base_dir: str = "exp4_coupled_joints",
+    exp4_al_dir: str = "exp4_coupled_joints_al",
+    exp4_chain_base_logger: str | None = None,
+    exp4_chain_al_logger: str | None = None,
+    exp4_chain_base_dir: str = "exp4_chain10_supp_soft",
+    exp4_chain_al_dir: str = "exp4_chain10_supp_al",
 ):
     tasks: List[Tuple[str, Callable[[], None]]] = [
         ("exp1_settling", lambda: plot_exp1_settling(data_dir, out_dir)),
         ("exp2_impact", lambda: plot_exp2_impact(data_dir, out_dir)),
-        ("exp4_drift_compare", lambda: plot_exp4_drift_compare(data_dir, out_dir, exp4_base_logger, exp4_al_logger)),
+        (
+            "exp4_drift_compare",
+            lambda: plot_exp4_drift_compare(
+                data_dir,
+                out_dir,
+                exp4_base_logger,
+                exp4_al_logger,
+                exp4_base_dir,
+                exp4_al_dir,
+            ),
+        ),
+        (
+            "exp4_chain10_supplement",
+            lambda: plot_exp4_chain10_supplement(
+                data_dir,
+                out_dir,
+                exp4_chain_base_logger,
+                exp4_chain_al_logger,
+                exp4_chain_base_dir,
+                exp4_chain_al_dir,
+            ),
+        ),
         ("exp5_bolt_vs_ref", lambda: plot_exp5_bolt_vs_ref(data_dir, out_dir)),
         ("d2_runtime_breakdown", lambda: plot_d2_runtime(baseline_csv, out_dir)),
         ("d1_pareto_total_vs_error", lambda: plot_d1_pareto(d1_csv, out_dir)),
@@ -310,6 +392,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--exp4-base-logger", type=str, default=None, help="Use a specific exp4 baseline logger file name.")
     parser.add_argument("--exp4-al-logger", type=str, default=None, help="Use a specific exp4 AL logger file name.")
+    parser.add_argument("--exp4-base-dir", type=str, default="exp4_fourbar_a1fix_soft", help="Use a specific exp4 baseline output directory name.")
+    parser.add_argument("--exp4-al-dir", type=str, default="exp4_fourbar_a1fix_al", help="Use a specific exp4 AL output directory name.")
+    parser.add_argument("--exp4-chain-base-logger", type=str, default=None, help="Use a specific exp4 10-link baseline logger file name.")
+    parser.add_argument("--exp4-chain-al-logger", type=str, default=None, help="Use a specific exp4 10-link AL logger file name.")
+    parser.add_argument("--exp4-chain-base-dir", type=str, default="exp4_chain10_supp_soft", help="Use a specific exp4 10-link baseline output directory name.")
+    parser.add_argument("--exp4-chain-al-dir", type=str, default="exp4_chain10_supp_al", help="Use a specific exp4 10-link AL output directory name.")
     return parser.parse_args()
 
 
@@ -322,6 +410,12 @@ def main() -> int:
         d1_csv=args.d1_csv.resolve(),
         exp4_base_logger=args.exp4_base_logger,
         exp4_al_logger=args.exp4_al_logger,
+        exp4_base_dir=args.exp4_base_dir,
+        exp4_al_dir=args.exp4_al_dir,
+        exp4_chain_base_logger=args.exp4_chain_base_logger,
+        exp4_chain_al_logger=args.exp4_chain_al_logger,
+        exp4_chain_base_dir=args.exp4_chain_base_dir,
+        exp4_chain_al_dir=args.exp4_chain_al_dir,
     )
     return 0
 
