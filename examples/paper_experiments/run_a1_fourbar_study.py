@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Dict, List
 
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 
 from study_utils import FIGS_DIR, OUTPUT_BASE, latest_logger, parse_logger_metrics, resolve_executable, sanitize_curve, save_fig, setup_axes
@@ -51,6 +52,36 @@ def curve_stats(path: Path) -> Dict[str, float]:
     }
 
 
+def load_reaction_curve(path: Path) -> pd.DataFrame:
+    df = pd.read_csv(path)
+    for col in ["t", "support_f_norm", "support_t_norm"]:
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+    df = df.dropna(subset=["t", "support_f_norm", "support_t_norm"])
+    df = df.drop_duplicates(subset=["t"], keep="last").sort_values("t").reset_index(drop=True)
+    return df
+
+
+def interpolate_rmse(ref: pd.DataFrame, cur: pd.DataFrame, column: str) -> float:
+    t = cur["t"].to_numpy()
+    y = cur[column].to_numpy()
+    ref_t = ref["t"].to_numpy()
+    ref_y = ref[column].to_numpy()
+    ref_interp = np.interp(t, ref_t, ref_y)
+    return float(np.sqrt(np.mean((y - ref_interp) ** 2)))
+
+
+def append_reaction_error_metrics(rows: List[Dict[str, object]]):
+    df = pd.DataFrame(rows)
+    for method in df["method"].unique():
+        sub = df[df["method"] == method].sort_values("dt")
+        ref_row = sub.iloc[0]
+        ref_curve = load_reaction_curve(Path(ref_row["reaction_csv"]))
+        for idx in sub.index:
+            curve = load_reaction_curve(Path(df.loc[idx, "reaction_csv"]))
+            rows[idx]["support_force_rmse_vs_finest"] = interpolate_rmse(ref_curve, curve, "support_f_norm")
+            rows[idx]["support_torque_rmse_vs_finest"] = interpolate_rmse(ref_curve, curve, "support_t_norm")
+
+
 def run_or_collect_case(exe: Path, dt: float, end_time: float, use_al: bool, force_run: bool) -> Dict[str, object]:
     method = "al" if use_al else "soft"
     run_name = f"exp4_fourbar_a1dt_{method}_dt{dt_tag(dt)}"
@@ -69,7 +100,7 @@ def run_or_collect_case(exe: Path, dt: float, end_time: float, use_al: bool, for
 
     metrics = parse_logger_metrics(logger)
     drift_path = case_dir / "joint_drift.csv"
-    proxy_path = case_dir / "fourbar_constraint_proxy.csv"
+    reaction_path = case_dir / "fourbar_reaction.csv"
     stats = curve_stats(drift_path)
     row: Dict[str, object] = {
         "method": "AL-IPC" if use_al else "soft",
@@ -84,7 +115,7 @@ def run_or_collect_case(exe: Path, dt: float, end_time: float, use_al: bool, for
         "peak_drift": stats["peak_drift"],
         "late_drift": stats["late_drift"],
         "final_drift": stats["final_drift"],
-        "proxy_csv": str(proxy_path),
+        "reaction_csv": str(reaction_path),
     }
     return row
 
@@ -104,7 +135,9 @@ def write_csv(rows: List[Dict[str, object]], path: Path):
         "peak_drift",
         "late_drift",
         "final_drift",
-        "proxy_csv",
+        "support_force_rmse_vs_finest",
+        "support_torque_rmse_vs_finest",
+        "reaction_csv",
     ]
     with path.open("w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -148,22 +181,22 @@ def plot_force_torque(rows: List[Dict[str, object]], out_dir: Path, reaction_dt:
 
     palette = {"soft": "#e377c2", "AL-IPC": "#1f77b4"}
     for row in selected:
-        proxy = pd.read_csv(Path(row["proxy_csv"]))
-        proxy["t"] = pd.to_numeric(proxy["t"], errors="coerce")
-        force = pd.to_numeric(proxy["support_point_force_proxy"], errors="coerce")
-        torque = pd.to_numeric(proxy["support_direction_torque_proxy"], errors="coerce")
-        mask = proxy["t"].notna() & force.notna() & torque.notna()
-        t = proxy.loc[mask, "t"]
+        reaction = pd.read_csv(Path(row["reaction_csv"]))
+        reaction["t"] = pd.to_numeric(reaction["t"], errors="coerce")
+        force = pd.to_numeric(reaction["support_f_norm"], errors="coerce")
+        torque = pd.to_numeric(reaction["support_t_norm"], errors="coerce")
+        mask = reaction["t"].notna() & force.notna() & torque.notna()
+        t = reaction.loc[mask, "t"]
         axs[0].plot(t, _smooth(force[mask]), color=palette[row["method"]], label=row["method"])
         axs[1].plot(t, _smooth(torque[mask]), color=palette[row["method"]], label=row["method"])
 
     axs[0].set_xlabel("Time (s)")
-    axs[0].set_ylabel("Support force proxy")
-    axs[0].set_title("A1 Four-Bar: Support Reaction Proxy")
+    axs[0].set_ylabel("Support reaction norm (N)")
+    axs[0].set_title("A1 Four-Bar: Recovered Support Reaction")
     axs[0].legend()
     axs[1].set_xlabel("Time (s)")
-    axs[1].set_ylabel("Support torque proxy")
-    axs[1].set_title("A1 Four-Bar: Support Torque Proxy")
+    axs[1].set_ylabel("Support torque norm (Nm)")
+    axs[1].set_title("A1 Four-Bar: Recovered Support Torque")
     save_fig(fig, out_dir, "a1_fourbar_force_torque")
 
 
@@ -189,6 +222,7 @@ def main() -> int:
         rows.append(run_or_collect_case(exe, dt, args.end_time, False, args.force_run))
         rows.append(run_or_collect_case(exe, dt, args.end_time, True, args.force_run))
 
+    append_reaction_error_metrics(rows)
     write_csv(rows, args.out_csv.resolve())
     plot_dt_sweep(rows, args.fig_dir.resolve())
     plot_force_torque(rows, args.fig_dir.resolve(), args.reaction_dt)

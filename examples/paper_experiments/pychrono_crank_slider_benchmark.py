@@ -22,29 +22,38 @@ REPO_ROOT = SCRIPT_PATH.parents[2]
 DEFAULT_OUTPUT_BASE = REPO_ROOT / "output" / "paper_experiments"
 
 
-def make_material(mode: str):
+def make_material(
+    mode: str,
+    nsc_compliance: float,
+    smc_young: float,
+    smc_poisson: float,
+    smc_kn: float,
+    smc_kt: float,
+    smc_gn: float,
+    smc_gt: float,
+):
     if mode == "nsc_ncp":
         mat = chrono.ChContactMaterialNSC()
         mat.SetFriction(0.0)
         mat.SetRestitution(0.0)
-        mat.SetCompliance(1e-9)
-        mat.SetComplianceT(1e-9)
+        mat.SetCompliance(nsc_compliance)
+        mat.SetComplianceT(nsc_compliance)
         return mat
     if mode == "smc_penalty":
         mat = chrono.ChContactMaterialSMC()
         mat.SetFriction(0.0)
         mat.SetRestitution(0.0)
-        mat.SetYoungModulus(2e8)
-        mat.SetPoissonRatio(0.3)
-        mat.SetKn(5e6)
-        mat.SetKt(2e6)
-        mat.SetGn(1e3)
-        mat.SetGt(1e3)
+        mat.SetYoungModulus(smc_young)
+        mat.SetPoissonRatio(smc_poisson)
+        mat.SetKn(smc_kn)
+        mat.SetKt(smc_kt)
+        mat.SetGn(smc_gn)
+        mat.SetGt(smc_gt)
         return mat
     raise ValueError(f"Unsupported mode: {mode}")
 
 
-def configure_system(mode: str):
+def configure_system(mode: str, solver_max_iters: int, solver_tol: float):
     if mode == "nsc_ncp":
         system = chrono.ChSystemNSC()
         system.SetSolverType(chrono.ChSolver.Type_APGD)
@@ -60,15 +69,30 @@ def configure_system(mode: str):
     system.SetGravitationalAcceleration(chrono.ChVector3d(0.0, -9.81, 0.0))
     iterative = system.GetSolver().AsIterative()
     if iterative is not None:
-        iterative.SetMaxIterations(200)
-        iterative.SetTolerance(1e-8 if mode == "nsc_ncp" else 1e-10)
+        iterative.SetMaxIterations(solver_max_iters)
+        iterative.SetTolerance(solver_tol)
         iterative.EnableWarmStart(True)
     return system
 
 
-def run_case(mode: str, dt: float, end_time: float, output_base: Path) -> Dict[str, str]:
-    material = make_material(mode)
-    system = configure_system(mode)
+def run_case(
+    mode: str,
+    dt: float,
+    end_time: float,
+    output_base: Path,
+    tag: str,
+    solver_max_iters: int,
+    solver_tol: float,
+    nsc_compliance: float,
+    smc_young: float,
+    smc_poisson: float,
+    smc_kn: float,
+    smc_kt: float,
+    smc_gn: float,
+    smc_gt: float,
+) -> Dict[str, str]:
+    material = make_material(mode, nsc_compliance, smc_young, smc_poisson, smc_kn, smc_kt, smc_gn, smc_gt)
+    system = configure_system(mode, solver_max_iters, solver_tol)
 
     link_width = 0.05
     link_thickness = 0.05
@@ -142,7 +166,7 @@ def run_case(mode: str, dt: float, end_time: float, output_base: Path) -> Dict[s
     slider_guide.Initialize(support, slider, chrono.ChFramed(slider_center, chrono.QUNIT))
     system.AddLink(slider_guide)
 
-    mode_tag = mode
+    mode_tag = mode if not tag else f"{mode}_{tag}"
     case_dir = output_base / f"pychrono_exp2_crank_slider_{mode_tag}"
     case_dir.mkdir(parents=True, exist_ok=True)
     state_path = case_dir / "crank_slider_state.csv"
@@ -193,6 +217,15 @@ def run_case(mode: str, dt: float, end_time: float, output_base: Path) -> Dict[s
         "final_slider_vx": f"{last_vx:.9g}",
         "time_step_s": f"{dt:.6g}",
         "end_time_s": f"{end_time:.6g}",
+        "solver_max_iters": str(solver_max_iters),
+        "solver_tol": f"{solver_tol:.9g}",
+        "nsc_compliance": f"{nsc_compliance:.9g}",
+        "smc_young": f"{smc_young:.9g}",
+        "smc_poisson": f"{smc_poisson:.9g}",
+        "smc_kn": f"{smc_kn:.9g}",
+        "smc_kt": f"{smc_kt:.9g}",
+        "smc_gn": f"{smc_gn:.9g}",
+        "smc_gt": f"{smc_gt:.9g}",
     }
     with summary_path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=list(row.keys()))
@@ -207,6 +240,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dt", type=float, default=0.004)
     parser.add_argument("--end-time", type=float, default=0.4)
     parser.add_argument("--output-base", type=Path, default=DEFAULT_OUTPUT_BASE)
+    parser.add_argument("--tag", type=str, default="")
+    parser.add_argument("--solver-max-iters", type=int, default=200)
+    parser.add_argument("--solver-tol", type=float, default=1e-8)
+    parser.add_argument("--nsc-compliance", type=float, default=1e-9)
+    parser.add_argument("--smc-young", type=float, default=2e8)
+    parser.add_argument("--smc-poisson", type=float, default=0.3)
+    parser.add_argument("--smc-kn", type=float, default=5e6)
+    parser.add_argument("--smc-kt", type=float, default=2e6)
+    parser.add_argument("--smc-gn", type=float, default=1e3)
+    parser.add_argument("--smc-gt", type=float, default=1e3)
     return parser.parse_args()
 
 
@@ -215,8 +258,27 @@ def main() -> int:
     output_base = args.output_base.resolve()
     output_base.mkdir(parents=True, exist_ok=True)
     modes: Sequence[str] = ["nsc_ncp", "smc_penalty"] if args.mode == "all" else [args.mode]
-    rows = [run_case(mode, args.dt, args.end_time, output_base) for mode in modes]
-    out_csv = output_base / "pychrono_exp2_crank_slider_summary.csv"
+    rows = [
+        run_case(
+            mode,
+            args.dt,
+            args.end_time,
+            output_base,
+            args.tag,
+            args.solver_max_iters,
+            args.solver_tol,
+            args.nsc_compliance,
+            args.smc_young,
+            args.smc_poisson,
+            args.smc_kn,
+            args.smc_kt,
+            args.smc_gn,
+            args.smc_gt,
+        )
+        for mode in modes
+    ]
+    out_csv_name = "pychrono_exp2_crank_slider_summary.csv" if not args.tag else f"pychrono_exp2_crank_slider_summary_{args.tag}.csv"
+    out_csv = output_base / out_csv_name
     with out_csv.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
         writer.writeheader()

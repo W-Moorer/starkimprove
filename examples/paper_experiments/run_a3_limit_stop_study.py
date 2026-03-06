@@ -15,12 +15,13 @@ import pandas as pd
 from study_utils import FIGS_DIR, OUTPUT_BASE, latest_logger, parse_logger_metrics, resolve_executable, save_fig, setup_axes
 
 
-def stark_env(run_name: str, dt: float, end_time: float, limit_deg: float, use_al: bool) -> Dict[str, str]:
+def stark_env(run_name: str, dt: float, end_time: float, limit_deg: float, use_al: bool, hard_stop_projection: bool) -> Dict[str, str]:
     env = dict(os.environ)
     env["STARK_EXP3_RUN_NAME"] = run_name
     env["STARK_EXP3_DT"] = f"{dt:.12g}"
     env["STARK_EXP3_END_TIME"] = f"{end_time:.12g}"
     env["STARK_EXP3_LIMIT_DEG"] = f"{limit_deg:.12g}"
+    env["STARK_EXP3_STOP_PROJECTION_ENABLED"] = "1" if hard_stop_projection else "0"
     if use_al:
         env["STARK_JOINT_AL_ENABLED"] = "1"
     else:
@@ -42,6 +43,7 @@ def load_state(path: Path) -> pd.DataFrame:
         "support_direction_torque_proxy",
         "support_reaction_torque_z",
         "support_reaction_force_norm",
+        "projection_applied",
     ]
     for col in numeric_cols:
         if col in df.columns:
@@ -53,19 +55,23 @@ def load_state(path: Path) -> pd.DataFrame:
 
 def first_trigger_time(df: pd.DataFrame, threshold: float) -> float | None:
     active = df[df["limit_violation_deg"] > threshold]
+    if "projection_applied" in df.columns:
+        active = pd.concat([active, df[df["projection_applied"] > 0.5]], ignore_index=True)
     if active.empty:
         return None
+    active = active.sort_values("t")
     return float(active["t"].iloc[0])
 
 
-def run_case(exe: Path, dt: float, end_time: float, limit_deg: float, use_al: bool, force_run: bool) -> Dict[str, object]:
+def run_case(exe: Path, dt: float, end_time: float, limit_deg: float, use_al: bool, force_run: bool, hard_stop_projection: bool) -> Dict[str, object]:
     method = "al" if use_al else "soft"
     pretty = "AL-IPC" if use_al else "soft"
-    run_name = f"exp3_limit_stop_a3_{method}"
+    suffix = "_hardstop" if hard_stop_projection else ""
+    run_name = f"exp3_limit_stop_a3_{method}{suffix}"
     case_dir = OUTPUT_BASE / run_name
     logger = latest_logger(case_dir)
     if force_run or logger is None:
-        env = stark_env(run_name, dt, end_time, limit_deg, use_al)
+        env = stark_env(run_name, dt, end_time, limit_deg, use_al, hard_stop_projection)
         print(f"[a3] run {run_name}")
         ret = subprocess.run([str(exe), "exp3"], cwd=exe.parents[3], env=env)
         if ret.returncode != 0:
@@ -216,6 +222,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--end-time", type=float, default=2.0)
     parser.add_argument("--limit-deg", type=float, default=35.0)
     parser.add_argument("--pychrono-mode", choices=["none", "nsc_ncp", "all"], default="nsc_ncp")
+    parser.add_argument("--hard-stop-projection", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--force-run", action="store_true")
     parser.add_argument("--out-csv", type=Path, default=OUTPUT_BASE / "a3_limit_stop_summary.csv")
     parser.add_argument("--fig-dir", type=Path, default=FIGS_DIR)
@@ -226,8 +233,8 @@ def main() -> int:
     args = parse_args()
     exe = resolve_executable(args.exe)
     rows = [
-        run_case(exe, args.dt, args.end_time, args.limit_deg, False, args.force_run),
-        run_case(exe, args.dt, args.end_time, args.limit_deg, True, args.force_run),
+        run_case(exe, args.dt, args.end_time, args.limit_deg, False, args.force_run, args.hard_stop_projection),
+        run_case(exe, args.dt, args.end_time, args.limit_deg, True, args.force_run, args.hard_stop_projection),
     ]
     if args.pychrono_mode != "none":
         rows.append(run_pychrono_case(args.dt, args.end_time, args.limit_deg, "nsc_ncp", args.force_run))

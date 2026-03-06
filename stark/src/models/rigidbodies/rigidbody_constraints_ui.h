@@ -109,6 +109,29 @@ namespace stark
 		inline auto& set_local_point_body_a(const Eigen::Vector3d& x) const { this->constraints->a_loc[this->idx] = x; return (*this); };
 		inline Eigen::Vector3d get_local_point_body_b() const { return this->constraints->b_loc[this->idx]; };
 		inline auto& set_local_point_body_b(const Eigen::Vector3d& x) const { this->constraints->b_loc[this->idx] = x; return (*this); };
+		inline Eigen::Vector3d get_world_gap_vector() const
+		{
+			return rb_b.transform_local_to_global_point(get_local_point_body_b()) - rb_a.transform_local_to_global_point(get_local_point_body_a());
+		}
+		inline Eigen::Vector3d get_penalty_force_vector() const
+		{
+			return get_stiffness() * get_world_gap_vector();
+		}
+		inline Eigen::Vector3d get_recovered_force_vector() const
+		{
+			if (std::isfinite(this->constraints->al_prev_violation[this->idx])) {
+				return this->constraints->al_lambda_vec[this->idx];
+			}
+			return get_penalty_force_vector();
+		}
+		inline Eigen::Vector3d get_reaction_force_on_body_b() const
+		{
+			return -get_recovered_force_vector();
+		}
+		inline double get_reaction_force_norm_on_body_b() const
+		{
+			return get_reaction_force_on_body_b().norm();
+		}
 		inline std::array<double, 2> get_violation_in_m_and_force() const
 		{
 			return RigidBodyConstraints::Points::violation_in_m_and_force(get_stiffness(),
@@ -185,6 +208,30 @@ namespace stark
 		inline auto& set_local_direction_body_a(const Eigen::Vector3d& d) const { this->constraints->da_loc[this->idx] = d; return (*this); };
 		inline Eigen::Vector3d get_local_direction_body_b() const { return this->constraints->db_loc[this->idx]; };
 		inline auto& set_local_direction_body_b(const Eigen::Vector3d& d) const { this->constraints->db_loc[this->idx] = d; return (*this); };
+		inline Eigen::Vector3d get_world_direction_gap_vector() const
+		{
+			return rb_b.transform_local_to_global_direction(get_local_direction_body_b()) - rb_a.transform_local_to_global_direction(get_local_direction_body_a());
+		}
+		inline Eigen::Vector3d get_penalty_direction_force_vector() const
+		{
+			return get_stiffness() * get_world_direction_gap_vector();
+		}
+		inline Eigen::Vector3d get_recovered_direction_force_vector() const
+		{
+			if (std::isfinite(this->constraints->al_prev_violation[this->idx])) {
+				return this->constraints->al_lambda_vec[this->idx];
+			}
+			return get_penalty_direction_force_vector();
+		}
+		inline Eigen::Vector3d get_reaction_torque_on_body_b() const
+		{
+			const Eigen::Vector3d da = rb_a.transform_local_to_global_direction(get_local_direction_body_a());
+			return -da.cross(get_recovered_direction_force_vector());
+		}
+		inline double get_reaction_torque_norm_on_body_b() const
+		{
+			return get_reaction_torque_on_body_b().norm();
+		}
 		inline std::array<double, 2> get_violation_in_deg_and_torque() const
 		{
 			return RigidBodyConstraints::Directions::violation_in_deg_and_torque(get_stiffness(), 
@@ -524,6 +571,10 @@ namespace stark
 		inline RigidBodyHandler& get_body_b() { return this->rb_b; };
 		inline RBCPointHandler& get_point_constraint() { return this->point; };
 		inline RBCDirectionHandler& get_direction_constraint() { return this->direction; };
+		inline Eigen::Vector3d get_reaction_force_on_body_b() const { return this->point.get_reaction_force_on_body_b(); };
+		inline double get_reaction_force_norm_on_body_b() const { return this->point.get_reaction_force_norm_on_body_b(); };
+		inline Eigen::Vector3d get_reaction_torque_on_body_b() const { return this->direction.get_reaction_torque_on_body_b(); };
+		inline double get_reaction_torque_norm_on_body_b() const { return this->direction.get_reaction_torque_norm_on_body_b(); };
 		inline auto& set_stiffness(double stiffness)
 		{
 			this->point.set_stiffness(stiffness);

@@ -9,6 +9,7 @@
 #include <cmath>
 #include <limits>
 #include <cstdlib>
+#include <memory>
 
 namespace {
     const std::string kCodegenDir = "e:/workspace/stark/codegen";
@@ -569,6 +570,9 @@ void exp3_limit_stop_hinge()
     const double dt = env_double("STARK_EXP3_DT", 1e-3);
     const double end_time = env_double("STARK_EXP3_END_TIME", 2.0);
     const double limit_angle_deg = env_double("STARK_EXP3_LIMIT_DEG", 35.0);
+    const bool stop_projection_enabled = env_flag("STARK_EXP3_STOP_PROJECTION_ENABLED", true);
+    const double stop_restitution = env_double("STARK_EXP3_STOP_RESTITUTION", 0.0);
+    const double stop_projection_eps_deg = env_double("STARK_EXP3_STOP_PROJECTION_EPS_DEG", 1e-8);
 
     stark::Settings settings;
     settings.output.simulation_name = run_name;
@@ -621,14 +625,65 @@ void exp3_limit_stop_hinge()
         const Eigen::Vector3d x_axis = rb.transform_local_to_global_direction(Eigen::Vector3d::UnitX());
         return std::atan2(x_axis.y(), x_axis.x()) * 180.0 / M_PI;
     };
+    auto center_at_angle = [pivot, rod_length](double theta_deg) {
+        const double theta_rad = theta_deg * M_PI / 180.0;
+        return pivot + Eigen::Vector3d(
+            0.5 * rod_length * std::cos(theta_rad),
+            0.5 * rod_length * std::sin(theta_rad),
+            0.0);
+    };
+    auto projected_flag = std::make_shared<int>(0);
 
     {
         std::string dir = sim.get_settings().output.output_directory;
         std::ofstream f_state(dir + "/limit_stop_state.csv", std::ios::trunc);
         f_state << "t,theta_deg,omega_deg_s,tip_x,tip_y,"
                 << "limit_violation_deg,limit_torque_proxy,"
-                << "support_point_force_proxy,support_direction_torque_proxy\n";
+                << "support_point_force_proxy,support_direction_torque_proxy,"
+                << "projection_applied\n";
     }
+
+    sim.add_time_event(
+        0.0,
+        settings.execution.end_simulation_time,
+        [rod_rb = rod.handler.rigidbody,
+         angle_deg,
+          center_at_angle,
+          limit_angle_deg,
+          pivot,
+          stop_projection_enabled,
+          stop_restitution,
+          stop_projection_eps_deg,
+         projected_flag](double t) mutable {
+            *projected_flag = 0;
+            if (!stop_projection_enabled || t <= 0.0) {
+                return;
+            }
+
+            const double theta = angle_deg(rod_rb);
+            const double omega_deg_s = rod_rb.get_angular_velocity().z() * 180.0 / M_PI;
+            const bool hit_negative = theta < -(limit_angle_deg + stop_projection_eps_deg) && omega_deg_s < 0.0;
+            const bool hit_positive = theta > +(limit_angle_deg + stop_projection_eps_deg) && omega_deg_s > 0.0;
+            if (!hit_negative && !hit_positive) {
+                return;
+            }
+
+            const double clamped_theta_deg = hit_negative ? -limit_angle_deg : +limit_angle_deg;
+            const double projected_omega_deg_s = -stop_restitution * omega_deg_s;
+            const double projected_omega_rad_s = projected_omega_deg_s * M_PI / 180.0;
+            const Eigen::Vector3d center = center_at_angle(clamped_theta_deg);
+            const Eigen::Vector3d r = center - pivot;
+            const Eigen::Vector3d projected_velocity(
+                -projected_omega_rad_s * r.y(),
+                +projected_omega_rad_s * r.x(),
+                0.0);
+
+            rod_rb.set_rotation(clamped_theta_deg, Eigen::Vector3d::UnitZ());
+            rod_rb.set_translation(center);
+            rod_rb.set_velocity(projected_velocity);
+            rod_rb.set_angular_velocity({ 0.0, 0.0, projected_omega_rad_s });
+            *projected_flag = 1;
+        });
 
     sim.add_time_event(
         0.0,
@@ -637,7 +692,8 @@ void exp3_limit_stop_hinge()
          rod_rb = rod.handler.rigidbody,
          hinge_stop,
          rod_length,
-         angle_deg](double t) mutable {
+         angle_deg,
+         projected_flag](double t) mutable {
             const double theta_deg = angle_deg(rod_rb);
             const double omega_deg_s = rod_rb.get_angular_velocity().z() * 180.0 / M_PI;
             const Eigen::Vector3d tip = rod_rb.transform_local_to_global_point({ 0.5 * rod_length, 0.0, 0.0 });
@@ -655,7 +711,8 @@ void exp3_limit_stop_hinge()
                     << limit_metrics[0] << ","
                     << limit_metrics[1] << ","
                     << support_point_force_proxy << ","
-                    << support_direction_torque_proxy << "\n";
+                    << support_direction_torque_proxy << ","
+                    << *projected_flag << "\n";
         });
 
     sim.run();
@@ -808,12 +865,14 @@ namespace {
                     << "coupler_cx,coupler_cy,coupler_theta_deg,"
                     << "rocker_cx,rocker_cy,rocker_theta_deg\n";
 
-            std::ofstream f_proxy(dir + "/fourbar_constraint_proxy.csv", std::ios::trunc);
-            f_proxy << "t,"
-                    << "support_point_force_proxy,support_direction_torque_proxy,"
-                    << "crank_coupler_point_force_proxy,crank_coupler_direction_torque_proxy,"
-                    << "coupler_rocker_point_force_proxy,coupler_rocker_direction_torque_proxy,"
-                    << "rocker_support_point_force_proxy,rocker_support_direction_torque_proxy\n";
+            std::ofstream f_reaction(dir + "/fourbar_reaction.csv", std::ios::trunc);
+            f_reaction << "t,"
+                       << "support_fx,support_fy,support_fz,support_f_norm,"
+                       << "support_tx,support_ty,support_tz,support_t_norm,"
+                       << "crank_coupler_f_norm,crank_coupler_t_norm,"
+                       << "coupler_rocker_f_norm,coupler_rocker_t_norm,"
+                       << "rocker_support_fx,rocker_support_fy,rocker_support_fz,rocker_support_f_norm,"
+                       << "rocker_support_tx,rocker_support_ty,rocker_support_tz,rocker_support_t_norm\n";
         }
 
         sim.add_time_event(
@@ -856,16 +915,23 @@ namespace {
                     << coupler_c.x() << "," << coupler_c.y() << "," << angle_deg(coupler_rb) << ","
                     << rocker_c.x() << "," << rocker_c.y() << "," << angle_deg(rocker_rb) << "\n";
 
-            std::ofstream f_proxy(dir + "/fourbar_constraint_proxy.csv", std::ios::app);
-            f_proxy << t << ","
-                    << support_hinge.get_point_constraint().get_violation_in_m_and_force()[1] << ","
-                    << support_hinge.get_direction_constraint().get_violation_in_deg_and_torque()[1] << ","
-                    << crank_coupler_hinge.get_point_constraint().get_violation_in_m_and_force()[1] << ","
-                    << crank_coupler_hinge.get_direction_constraint().get_violation_in_deg_and_torque()[1] << ","
-                    << coupler_rocker_hinge.get_point_constraint().get_violation_in_m_and_force()[1] << ","
-                    << coupler_rocker_hinge.get_direction_constraint().get_violation_in_deg_and_torque()[1] << ","
-                    << rocker_support_hinge.get_point_constraint().get_violation_in_m_and_force()[1] << ","
-                    << rocker_support_hinge.get_direction_constraint().get_violation_in_deg_and_torque()[1] << "\n";
+            const Eigen::Vector3d support_force = support_hinge.get_reaction_force_on_body_b();
+            const Eigen::Vector3d support_torque = support_hinge.get_reaction_torque_on_body_b();
+            const Eigen::Vector3d crank_coupler_force = crank_coupler_hinge.get_reaction_force_on_body_b();
+            const Eigen::Vector3d crank_coupler_torque = crank_coupler_hinge.get_reaction_torque_on_body_b();
+            const Eigen::Vector3d coupler_rocker_force = coupler_rocker_hinge.get_reaction_force_on_body_b();
+            const Eigen::Vector3d coupler_rocker_torque = coupler_rocker_hinge.get_reaction_torque_on_body_b();
+            const Eigen::Vector3d rocker_support_force = rocker_support_hinge.get_reaction_force_on_body_b();
+            const Eigen::Vector3d rocker_support_torque = rocker_support_hinge.get_reaction_torque_on_body_b();
+
+            std::ofstream f_reaction(dir + "/fourbar_reaction.csv", std::ios::app);
+            f_reaction << t << ","
+                       << support_force.x() << "," << support_force.y() << "," << support_force.z() << "," << support_force.norm() << ","
+                       << support_torque.x() << "," << support_torque.y() << "," << support_torque.z() << "," << support_torque.norm() << ","
+                       << crank_coupler_force.norm() << "," << crank_coupler_torque.norm() << ","
+                       << coupler_rocker_force.norm() << "," << coupler_rocker_torque.norm() << ","
+                       << rocker_support_force.x() << "," << rocker_support_force.y() << "," << rocker_support_force.z() << "," << rocker_support_force.norm() << ","
+                       << rocker_support_torque.x() << "," << rocker_support_torque.y() << "," << rocker_support_torque.z() << "," << rocker_support_torque.norm() << "\n";
         });
     } else {
         auto c_params = sim.interactions->contact->get_global_params();
