@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import math
 import time
 from pathlib import Path
 from typing import Dict, List, Sequence
@@ -75,31 +76,31 @@ def load_scaled_mesh(path: Path, scale: float):
     return mesh
 
 
-def make_material(mode: str):
+def make_material(mode: str, args: argparse.Namespace):
     if mode in {"nsc_lcp", "nsc_ncp"}:
         mat = chrono.ChContactMaterialNSC()
         mat.SetFriction(0.0)
         mat.SetRestitution(0.0)
-        mat.SetCompliance(1e-9)
-        mat.SetComplianceT(1e-9)
+        mat.SetCompliance(args.nsc_compliance)
+        mat.SetComplianceT(args.nsc_compliance)
         return mat
 
     if mode == "smc_penalty":
         mat = chrono.ChContactMaterialSMC()
         mat.SetFriction(0.0)
         mat.SetRestitution(0.0)
-        mat.SetYoungModulus(2e8)
-        mat.SetPoissonRatio(0.3)
-        mat.SetKn(5e6)
-        mat.SetKt(2e6)
-        mat.SetGn(1e3)
-        mat.SetGt(1e3)
+        mat.SetYoungModulus(args.smc_young)
+        mat.SetPoissonRatio(args.smc_poisson)
+        mat.SetKn(args.smc_kn)
+        mat.SetKt(args.smc_kt)
+        mat.SetGn(args.smc_gn)
+        mat.SetGt(args.smc_gt)
         return mat
 
     raise ValueError(f"Unsupported mode: {mode}")
 
 
-def configure_system(mode: str):
+def configure_system(mode: str, args: argparse.Namespace):
     if mode == "nsc_lcp":
         system = chrono.ChSystemNSC()
         system.SetSolverType(chrono.ChSolver.Type_PSOR)
@@ -119,15 +120,8 @@ def configure_system(mode: str):
 
     iterative = system.GetSolver().AsIterative()
     if iterative is not None:
-        if mode == "nsc_lcp":
-            iterative.SetMaxIterations(120)
-            iterative.SetTolerance(1e-8)
-        elif mode == "nsc_ncp":
-            iterative.SetMaxIterations(200)
-            iterative.SetTolerance(1e-8)
-        else:
-            iterative.SetMaxIterations(200)
-            iterative.SetTolerance(1e-10)
+        iterative.SetMaxIterations(int(args.solver_max_iters))
+        iterative.SetTolerance(args.solver_tol)
         iterative.EnableWarmStart(True)
 
     return system
@@ -145,11 +139,12 @@ def run_case(
     dt: float,
     end_time: float,
     output_base: Path,
+    args: argparse.Namespace,
     density: float = 8050.0,
     scale: float = 0.01,
 ) -> Dict[str, str]:
-    system = configure_system(mode)
-    material = make_material(mode)
+    system = configure_system(mode, args)
+    material = make_material(mode, args)
 
     nut_mesh = load_scaled_mesh(resolve_model_path("nut-big.obj"), scale)
     screw_mesh = load_scaled_mesh(resolve_model_path("screw-big.obj"), scale)
@@ -163,7 +158,8 @@ def run_case(
     system.SetGravitationalAcceleration(chrono.ChVector3d(0.0, -9.81, 0.0))
 
     mode_tag = MODE_TO_TAG[mode]
-    out_dir = output_base / f"pychrono_exp5_{mode_tag}"
+    suffix = f"_{args.tag}" if args.tag else ""
+    out_dir = output_base / f"pychrono_exp5_{mode_tag}{suffix}"
     out_dir.mkdir(parents=True, exist_ok=True)
 
     n_steps = int(round(end_time / dt))
@@ -174,6 +170,7 @@ def run_case(
     last_y = 0.0
     last_vy = 0.0
 
+    invalid_state = False
     with state_path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
         writer.writerow(["t", "x", "y", "z", "vx", "vy", "vz"])
@@ -184,17 +181,10 @@ def run_case(
             x = screw.GetPos()
             v = screw.GetPosDt()
 
-            writer.writerow(
-                [
-                    f"{t:.9f}",
-                    f"{x.x:.9f}",
-                    f"{x.y:.9f}",
-                    f"{x.z:.9f}",
-                    f"{v.x:.9f}",
-                    f"{v.y:.9f}",
-                    f"{v.z:.9f}",
-                ]
-            )
+            components = [x.x, x.y, x.z, v.x, v.y, v.z]
+            if any(not math.isfinite(val) for val in components):
+                invalid_state = True
+            writer.writerow([f"{t:.9f}"] + [f"{val:.9f}" for val in components])
             last_y = x.y
             last_vy = v.y
 
@@ -220,6 +210,17 @@ def run_case(
         "avg_solver_iterations": f"{avg_iters:.6g}",
         "final_y": f"{last_y:.9f}",
         "final_vy": f"{last_vy:.9f}",
+        "solver_max_iters": str(int(args.solver_max_iters)),
+        "solver_tol": f"{args.solver_tol:.6g}",
+        "nsc_compliance": f"{args.nsc_compliance:.6g}",
+        "smc_kn": f"{args.smc_kn:.6g}",
+        "smc_kt": f"{args.smc_kt:.6g}",
+        "smc_gn": f"{args.smc_gn:.6g}",
+        "smc_gt": f"{args.smc_gt:.6g}",
+        "smc_young": f"{args.smc_young:.6g}",
+        "smc_poisson": f"{args.smc_poisson:.6g}",
+        "tag": args.tag or "",
+        "invalid_state": "1" if invalid_state else "0",
     }
 
     with summary_path.open("w", newline="", encoding="utf-8") as f:
@@ -240,6 +241,16 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--dt", type=float, default=0.01, help="Time step.")
     parser.add_argument("--end-time", type=float, default=5.0, help="Simulation end time.")
+    parser.add_argument("--tag", type=str, default="", help="Optional output directory tag.")
+    parser.add_argument("--solver-max-iters", type=int, default=120, help="Iterative solver max iterations.")
+    parser.add_argument("--solver-tol", type=float, default=1e-8, help="Iterative solver tolerance.")
+    parser.add_argument("--nsc-compliance", type=float, default=1e-9, help="NSC compliance.")
+    parser.add_argument("--smc-kn", type=float, default=5e6, help="SMC normal stiffness.")
+    parser.add_argument("--smc-kt", type=float, default=2e6, help="SMC tangential stiffness.")
+    parser.add_argument("--smc-gn", type=float, default=1e3, help="SMC normal damping.")
+    parser.add_argument("--smc-gt", type=float, default=1e3, help="SMC tangential damping.")
+    parser.add_argument("--smc-young", type=float, default=2e8, help="SMC Young's modulus.")
+    parser.add_argument("--smc-poisson", type=float, default=0.3, help="SMC Poisson ratio.")
     parser.add_argument(
         "--output-base",
         type=Path,
@@ -261,7 +272,7 @@ def main():
     rows: List[Dict[str, str]] = []
     for mode in modes:
         try:
-            row = run_case(mode, args.dt, args.end_time, output_base)
+            row = run_case(mode, args.dt, args.end_time, output_base, args)
             rows.append(row)
             print(
                 f"[{mode}] wall={float(row['wall_time_s']):.3f}s, "

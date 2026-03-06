@@ -230,34 +230,72 @@ def plot_exp4_chain10_supplement(
 
 
 def plot_exp5_bolt_vs_ref(data_dir: Path, out_dir: Path):
+    summary_csv = data_dir / "exp5_complex_contact_summary.csv"
     sim_path = data_dir / "exp5_bolt" / "screw_state.csv"
     ref_pos_path = data_dir / "exp5_ref" / "Pos_Ty_mu0.csv"
     ref_vel_path = data_dir / "exp5_ref" / "Vel_Ty_mu0.csv"
     if not sim_path.exists() or not ref_pos_path.exists() or not ref_vel_path.exists():
         raise FileNotFoundError("Missing exp5 simulation/reference csv.")
 
-    sim_df = pd.read_csv(sim_path)
-    sim_df = sim_df.drop_duplicates(subset=["t"], keep="last").sort_values("t")
     ref_pos = load_ref_curve(ref_pos_path, scale=0.01)
     ref_vel = load_ref_curve(ref_vel_path, scale=0.01)
-
-    y0_sim = float(sim_df["y"].iloc[0])
     y0_ref = float(ref_pos["v"].iloc[0])
-    y_aligned = sim_df["y"] - y0_sim
     ref_y_aligned = ref_pos["v"] - y0_ref
 
     fig, axs = plt.subplots(2, 1, figsize=(6, 6), sharex=True)
     setup_axes(axs[0])
     setup_axes(axs[1])
 
-    axs[0].plot(sim_df["t"], y_aligned, color="#1f77b4", label="IPC (aligned)")
-    axs[0].plot(ref_pos["t"], ref_y_aligned, color="black", linestyle="--", linewidth=1.5, label="Reference (aligned)")
+    axs[0].plot(ref_pos["t"], ref_y_aligned, color="black", linestyle="--", linewidth=1.5, label="RecurDyn (aligned)")
+    axs[1].plot(ref_vel["t"], ref_vel["v"], color="black", linestyle="--", linewidth=1.5, label="RecurDyn")
+
+    palette = {
+        "STARK": "#1f77b4",
+        "nsc_lcp": "#2ca02c",
+        "nsc_ncp": "#ff7f0e",
+        "smc_penalty": "#d62728",
+    }
+    labels = {
+        "STARK": "STARK IPC",
+        "nsc_lcp": "PyChrono NSC-LCP",
+        "nsc_ncp": "PyChrono NSC-APGD",
+        "smc_penalty": "PyChrono SMC",
+    }
+
+    plotted = False
+    if summary_csv.exists():
+        summary = pd.read_csv(summary_csv)
+        for _, row in summary.iterrows():
+            framework = str(row.get("framework", ""))
+            if framework == "PyChrono":
+                stable = pd.to_numeric(pd.Series([row.get("stable", np.nan)]), errors="coerce").iloc[0]
+                comp = pd.to_numeric(pd.Series([row.get("composite_error", np.nan)]), errors="coerce").iloc[0]
+                if not np.isfinite(stable) or stable < 0.5 or not np.isfinite(comp) or comp >= 5.0:
+                    continue
+            state_path = Path(str(row.get("state_csv", "")))
+            if not state_path.exists():
+                continue
+            sim_df = pd.read_csv(state_path)
+            sim_df = sim_df.drop_duplicates(subset=["t"], keep="last").sort_values("t")
+            y0_sim = float(pd.to_numeric(sim_df["y"], errors="coerce").dropna().iloc[0])
+            y_aligned = pd.to_numeric(sim_df["y"], errors="coerce") - y0_sim
+            mode = "STARK" if framework == "STARK" else str(row.get("mode", ""))
+            axs[0].plot(sim_df["t"], y_aligned, color=palette.get(mode, "#7f7f7f"), label=labels.get(mode, mode))
+            axs[1].plot(sim_df["t"], sim_df["vy"], color=palette.get(mode, "#7f7f7f"), label=labels.get(mode, mode))
+            plotted = True
+
+    if not plotted:
+        sim_df = pd.read_csv(sim_path)
+        sim_df = sim_df.drop_duplicates(subset=["t"], keep="last").sort_values("t")
+        y0_sim = float(sim_df["y"].iloc[0])
+        y_aligned = sim_df["y"] - y0_sim
+        axs[0].plot(sim_df["t"], y_aligned, color="#1f77b4", label="STARK IPC (aligned)")
+        axs[1].plot(sim_df["t"], sim_df["vy"], color="#1f77b4", label="STARK IPC")
+
     axs[0].set_ylabel("Position y (m)")
-    axs[0].set_title("Exp5: Screw y / vy vs Reference")
+    axs[0].set_title("Exp5: Screw y / vy vs RecurDyn")
     axs[0].legend(loc="upper right")
 
-    axs[1].plot(sim_df["t"], sim_df["vy"], color="#1f77b4", label="IPC")
-    axs[1].plot(ref_vel["t"], ref_vel["v"], color="black", linestyle="--", linewidth=1.5, label="Reference")
     axs[1].set_xlabel("Time (s)")
     axs[1].set_ylabel(r"Velocity $v_y$ (m/s)")
     axs[1].legend(loc="lower right")

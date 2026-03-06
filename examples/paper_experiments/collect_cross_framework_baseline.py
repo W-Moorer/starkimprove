@@ -162,9 +162,9 @@ def collect_exp5_rows(output_base: Path) -> List[Dict[str, str]]:
     t_end = t_sim[-1] if t_sim else None
     return [
         {
-            "method_id": "exp5_stark_vs_ref",
-            "method_name": "STARK IPC vs Reference",
-            "framework": "STARK / Reference",
+            "method_id": "exp5_stark_vs_recurdyn",
+            "method_name": "STARK IPC vs RecurDyn",
+            "framework": "STARK / RecurDyn",
             "contact_formulation": "Threaded contact (mu=0)",
             "simulated_time_s": format_num(t_end, 2),
             "step_count": format_num(logm["time_steps"], 0),
