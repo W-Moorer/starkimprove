@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import math
 import re
+import shutil
 from pathlib import Path
 from typing import Dict, Optional
 
@@ -48,6 +49,44 @@ def resolve_executable(path_arg: Optional[Path] = None) -> Path:
         if candidate.exists():
             return candidate.resolve()
     raise FileNotFoundError("Could not find examples executable.")
+
+
+def resolve_conda_executable() -> Path:
+    env_conda = Path(__import__("os").environ.get("CONDA_EXE", ""))
+    candidates = []
+    if str(env_conda):
+        candidates.append(env_conda)
+    which_conda = shutil.which("conda")
+    if which_conda:
+        candidates.append(Path(which_conda))
+    candidates.extend(
+        [
+            Path(r"C:\ProgramData\anaconda3\Scripts\conda.exe"),
+            Path(r"E:\Anaconda\Scripts\conda.exe"),
+        ]
+    )
+    seen: set[str] = set()
+    for candidate in candidates:
+        key = str(candidate).lower()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        if candidate.exists():
+            return candidate.resolve()
+    raise FileNotFoundError("Could not find conda executable.")
+
+
+def build_conda_python_command(script_path: Path, *args: object, env_name: str = "chrono-baseline") -> list[str]:
+    return [
+        str(resolve_conda_executable()),
+        "run",
+        "--no-capture-output",
+        "-n",
+        env_name,
+        "python",
+        str(script_path),
+        *[str(arg) for arg in args],
+    ]
 
 
 def latest_logger(case_dir: Path) -> Optional[Path]:
@@ -114,4 +153,3 @@ def save_fig(fig: plt.Figure, out_dir: Path, stem: str):
     fig.savefig(out_dir / f"{stem}.pdf", format="pdf")
     fig.savefig(out_dir / f"{stem}.svg", format="svg")
     plt.close(fig)
-

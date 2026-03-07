@@ -22,7 +22,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from study_utils import FIGS_DIR, OUTPUT_BASE, latest_logger, parse_logger_metrics, resolve_executable, save_fig, setup_axes
+from study_utils import FIGS_DIR, OUTPUT_BASE, build_conda_python_command, latest_logger, parse_logger_metrics, resolve_executable, save_fig, setup_axes
 
 
 SCRIPT_PATH = Path(__file__).resolve()
@@ -281,28 +281,38 @@ def run_pychrono_case(
 
     if force_run or not summary_csv.exists() or not state_csv.exists():
         script_path = REPO_ROOT / "examples" / "paper_experiments" / "pychrono_exp5_baselines.py"
-        cmd = (
-            "conda activate chrono-baseline; "
-            f"python \"{script_path}\" "
-            f"--mode {mode} "
-            f"--dt {dt:.12g} "
-            f"--end-time {end_time:.12g} "
-            f"--output-base \"{OUTPUT_BASE}\" "
-            f"--tag {tag} "
-            f"--solver-max-iters {int(params['solver_max_iters'])} "
-            f"--solver-tol {params['solver_tol']:.12g} "
-            f"--nsc-compliance {params['nsc_compliance']:.12g} "
-            f"--smc-kn {params['smc_kn']:.12g} "
-            f"--smc-kt {params['smc_kt']:.12g} "
-            f"--smc-gn {params['smc_gn']:.12g} "
-            f"--smc-gt {params['smc_gt']:.12g} "
-            f"--smc-young {params['smc_young']:.12g} "
-            f"--smc-poisson {params['smc_poisson']:.12g}"
+        cmd = build_conda_python_command(
+            script_path,
+            "--mode",
+            mode,
+            "--dt",
+            f"{dt:.12g}",
+            "--end-time",
+            f"{end_time:.12g}",
+            "--output-base",
+            OUTPUT_BASE,
+            "--tag",
+            tag,
+            "--solver-max-iters",
+            int(params["solver_max_iters"]),
+            "--solver-tol",
+            f"{params['solver_tol']:.12g}",
+            "--nsc-compliance",
+            f"{params['nsc_compliance']:.12g}",
+            "--smc-kn",
+            f"{params['smc_kn']:.12g}",
+            "--smc-kt",
+            f"{params['smc_kt']:.12g}",
+            "--smc-gn",
+            f"{params['smc_gn']:.12g}",
+            "--smc-gt",
+            f"{params['smc_gt']:.12g}",
+            "--smc-young",
+            f"{params['smc_young']:.12g}",
+            "--smc-poisson",
+            f"{params['smc_poisson']:.12g}",
         )
-        ret = subprocess.run(
-            ["powershell", "-NoLogo", "-Command", cmd],
-            cwd=str(REPO_ROOT),
-        )
+        ret = subprocess.run(cmd, cwd=str(REPO_ROOT))
         if ret.returncode != 0:
             raise RuntimeError(f"PyChrono exp5 failed: {mode} {tag}")
 

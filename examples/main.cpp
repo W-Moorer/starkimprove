@@ -638,8 +638,8 @@ int main(int argc, char** argv)
 		exp2_high_speed_impact();
 		return 0;
 	}
-	if (experiment == "exp2_slider" || experiment == "exp2_crank_slider") {
-		exp2_crank_slider_impact();
+	if (experiment == "exp2_chain10" || experiment == "exp2_a2") {
+		exp2_chain10_impact();
 		return 0;
 	}
 	if (experiment == "exp3" || experiment == "exp3_limit_stop") {
@@ -666,7 +666,7 @@ int main(int argc, char** argv)
 		exp7_forklift_lift();
 		return 0;
 	}
-	std::cerr << "Unknown experiment argument: " << experiment << " (use exp1|exp1_adaptive|exp1_gap_adaptive|exp1_mass_adaptive|exp1_fixed_soft|exp1_mass_ratio_sweep|exp2|exp2_slider|exp3|exp4|exp4_fourbar|exp5|exp6|exp7)" << std::endl;
+	std::cerr << "Unknown experiment argument: " << experiment << " (use exp1|exp1_adaptive|exp1_gap_adaptive|exp1_mass_adaptive|exp1_fixed_soft|exp1_mass_ratio_sweep|exp2|exp2_chain10|exp3|exp4|exp4_fourbar|exp5|exp6|exp7)" << std::endl;
 	return 1;
 
 

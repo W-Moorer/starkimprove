@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from study_utils import FIGS_DIR, OUTPUT_BASE, latest_logger, parse_logger_metrics, resolve_executable, save_fig, setup_axes
+from study_utils import FIGS_DIR, OUTPUT_BASE, build_conda_python_command, latest_logger, parse_logger_metrics, resolve_executable, save_fig, setup_axes
 
 
 def stark_env(run_name: str, dt: float, end_time: float, limit_deg: float, hard_stop_projection: bool) -> Dict[str, str]:
@@ -113,20 +113,21 @@ def run_pychrono_case(dt: float, end_time: float, limit_deg: float, mode: str, f
     summary_csv = OUTPUT_BASE / f"pychrono_exp3_limit_stop_{mode}" / "summary.csv"
     state_csv = OUTPUT_BASE / f"pychrono_exp3_limit_stop_{mode}" / "limit_stop_state.csv"
     if force_run or not summary_csv.exists() or not state_csv.exists():
-        cmd = (
-            "conda activate chrono-baseline; "
-            f"python '{script_path}' "
-            f"--mode {mode} "
-            f"--dt {dt:.12g} "
-            f"--end-time {end_time:.12g} "
-            f"--limit-deg {limit_deg:.12g} "
-            f"--output-base '{OUTPUT_BASE}'"
+        cmd = build_conda_python_command(
+            script_path,
+            "--mode",
+            mode,
+            "--dt",
+            f"{dt:.12g}",
+            "--end-time",
+            f"{end_time:.12g}",
+            "--limit-deg",
+            f"{limit_deg:.12g}",
+            "--output-base",
+            OUTPUT_BASE,
         )
         print(f"[a3] run PyChrono {mode}")
-        ret = subprocess.run(
-            ["powershell", "-NoLogo", "-Command", cmd],
-            cwd=Path(__file__).resolve().parents[2],
-        )
+        ret = subprocess.run(cmd, cwd=Path(__file__).resolve().parents[2])
         if ret.returncode != 0:
             raise RuntimeError(f"PyChrono A3 benchmark failed: {mode}")
 

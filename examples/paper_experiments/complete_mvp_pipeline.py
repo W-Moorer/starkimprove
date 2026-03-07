@@ -42,7 +42,7 @@ def build_payload() -> Dict:
             FIG_OUT_DIR / "a1_fourbar_dt_sweep.pdf",
             FIG_OUT_DIR / "a1_fourbar_force_torque.pdf",
             FIG_OUT_DIR / "a1_chain10_joint_drift_compare.pdf",
-            FIG_OUT_DIR / "a2_crank_slider_compare.pdf",
+            FIG_OUT_DIR / "a2_chain10_impact_compare.pdf",
             FIG_OUT_DIR / "a3_limit_stop_compare.pdf",
             FIG_OUT_DIR / "exp5_bolt_vs_ref.pdf",
             FIG_OUT_DIR / "exp7_forklift_compare.pdf",
@@ -53,7 +53,7 @@ def build_payload() -> Dict:
     )
     artifacts = {
         "a1_fourbar_dt_sweep_csv": maybe(OUTPUT_BASE / "a1_fourbar_dt_sweep.csv"),
-        "a2_crank_slider_summary_csv": maybe(OUTPUT_BASE / "a2_crank_slider_summary.csv"),
+        "a2_chain10_impact_summary_csv": maybe(OUTPUT_BASE / "a2_chain10_impact_summary.csv"),
         "a3_limit_stop_summary_csv": maybe(OUTPUT_BASE / "a3_limit_stop_summary.csv"),
         "d1_parameter_sensitivity_csv": maybe(OUTPUT_BASE / "d1_parameter_sensitivity.csv"),
         "d2_complete_ablation_csv": maybe(OUTPUT_BASE / "d2_complete_ablation.csv"),
@@ -64,7 +64,7 @@ def build_payload() -> Dict:
     }
     present = [k for k, v in artifacts.items() if v]
     required = [
-        "a2_crank_slider_summary_csv",
+        "a2_chain10_impact_summary_csv",
         "a3_limit_stop_summary_csv",
         "d2_complete_ablation_csv",
         "d3_mass_ratio_sweep_csv",
@@ -83,7 +83,7 @@ def build_payload() -> Dict:
         ],
         "supporting_experiments": {
             "verification_only": ["A1_four_bar", "A1_chain10"],
-            "main_evidence": ["A2_crank_slider", "A3_limit_stop", "S1_exp5", "S2_exp7", "D1", "D2", "D3"],
+            "main_evidence": ["A2_chain10_impact", "A3_limit_stop", "S1_exp5", "S2_exp7", "D1", "D2", "D3"],
             "negative_or_boundary": ["B1_preconditioner_ablation"],
         },
         "artifacts": artifacts,

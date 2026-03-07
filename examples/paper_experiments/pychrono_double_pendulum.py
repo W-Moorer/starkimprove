@@ -10,6 +10,10 @@ import csv
 import time
 from pathlib import Path
 
+from pychrono_bootstrap import configure_windows_dll_search
+
+configure_windows_dll_search()
+
 try:
     import pychrono.core as chrono
 except ImportError as exc:
