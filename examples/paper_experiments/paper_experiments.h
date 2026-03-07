@@ -13,3 +13,4 @@ void exp4_coupled_joints_and_impacts();
 void exp4_fourbar_closed_loop();
 void exp5_bolt_from_models();
 void exp6_double_pendulum();
+void exp7_forklift_lift();

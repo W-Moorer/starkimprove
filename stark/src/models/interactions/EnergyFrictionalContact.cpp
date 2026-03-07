@@ -20,6 +20,7 @@ EnergyFrictionalContact::EnergyFrictionalContact(core::Stark& stark, const spPoi
 
 	// Callbacks
 	stark.callbacks.add_before_time_step([&]() { this->_before_time_step__update_friction_contacts(stark); });
+	stark.callbacks.add_before_time_step([&]() { stark.logger.set("contact_unstable_this_step", 0); });
 	stark.callbacks.add_before_energy_evaluation([&]() { this->_before_energy_evaluation__update_contacts(stark); });
 	stark.callbacks.add_is_intermidiate_state_valid([&]() { return this->_is_intermidiate_state_valid(stark, /*is_initial_check=*/false); });
 	stark.callbacks.add_is_initial_state_valid([&]() { return this->_is_intermidiate_state_valid(stark, /*is_initial_check=*/true); });
@@ -911,6 +912,7 @@ void stark::EnergyFrictionalContact::_on_intermidiate_state_invalid(core::Stark&
 	}
 
 	if (this->contact_stiffness > old_stiffness) {
+		stark.logger.set("contact_unstable_this_step", 1);
 		stark.logger.add_to_counter("hardening_count", 1);
 		stark.logger.add_to_counter("contact_hardening_count", 1);
 	}

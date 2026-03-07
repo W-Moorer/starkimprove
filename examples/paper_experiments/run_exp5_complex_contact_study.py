@@ -235,32 +235,45 @@ def run_pychrono_case(
     legacy_summary_csv = legacy_case_dir / "summary.csv"
     legacy_state_csv = legacy_case_dir / "screw_state.csv"
 
-    if not force_run and not summary_csv.exists() and legacy_summary_csv.exists() and legacy_state_csv.exists():
-        legacy_row = pd.read_csv(legacy_summary_csv).iloc[0]
-        legacy_dt = float(legacy_row.get("time_step_s", dt))
-        use_legacy = False
+    def matches_legacy_defaults(legacy_dt: float) -> bool:
         if mode == "nsc_lcp":
-            use_legacy = (
+            return (
                 abs(legacy_dt - 0.05) < 1e-12
                 and abs(dt - 0.05) < 1e-12
                 and int(params["solver_max_iters"]) == 120
                 and abs(params["nsc_compliance"] - 1e-9) < 1e-20
             )
-        elif mode == "nsc_ncp":
-            use_legacy = (
+        if mode == "nsc_ncp":
+            return (
                 abs(legacy_dt - 0.05) < 1e-12
                 and abs(dt - 0.05) < 1e-12
                 and int(params["solver_max_iters"]) == 200
                 and abs(params["nsc_compliance"] - 1e-9) < 1e-20
             )
-        elif mode == "smc_penalty":
-            use_legacy = (
+        if mode == "smc_penalty":
+            return (
                 abs(legacy_dt - 0.01) < 1e-12
                 and abs(dt - 0.01) < 1e-12
                 and int(params["solver_max_iters"]) == 200
                 and abs(params["smc_kn"] - 5e6) < 1e-12
                 and abs(params["smc_gn"] - 1e3) < 1e-12
             )
+        return False
+
+    def candidate_is_invalid(path: Path) -> bool:
+        if not path.exists():
+            return True
+        row = pd.read_csv(path).iloc[0]
+        invalid_state = int(float(row.get("invalid_state", 0)))
+        final_y = pd.to_numeric([row.get("final_y", float("nan"))], errors="coerce")[0]
+        final_vy = pd.to_numeric([row.get("final_vy", float("nan"))], errors="coerce")[0]
+        return invalid_state != 0 or not np.isfinite(final_y) or not np.isfinite(final_vy)
+
+    if not force_run and legacy_summary_csv.exists() and legacy_state_csv.exists():
+        legacy_row = pd.read_csv(legacy_summary_csv).iloc[0]
+        legacy_dt = float(legacy_row.get("time_step_s", dt))
+        current_invalid = candidate_is_invalid(summary_csv) if summary_csv.exists() else True
+        use_legacy = matches_legacy_defaults(legacy_dt) and current_invalid
         if use_legacy:
             case_dir = legacy_case_dir
             summary_csv = legacy_summary_csv

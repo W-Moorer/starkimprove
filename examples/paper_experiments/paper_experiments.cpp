@@ -10,11 +10,13 @@
 #include <limits>
 #include <cstdlib>
 #include <memory>
+#include <stdexcept>
 
 namespace {
     const std::string kCodegenDir = "e:/workspace/stark/codegen";
     const std::string kOutputBase = "e:/workspace/stark/output/paper_experiments";
     const std::string kModelsDir = "e:/workspace/stark/models";
+    const std::string kChronoDataDir = "E:/Anaconda/envs/chrono-baseline/Library/data";
 
     bool env_flag(const char* key, bool default_value = false)
     {
@@ -46,6 +48,15 @@ namespace {
         return (parsed > 0) ? parsed : default_value;
     }
 
+    int env_int_any(const char* key, int default_value)
+    {
+        const char* raw = std::getenv(key);
+        if (raw == nullptr) {
+            return default_value;
+        }
+        return std::atoi(raw);
+    }
+
     std::string env_string(const char* key, const std::string& default_value)
     {
         const char* raw = std::getenv(key);
@@ -64,12 +75,23 @@ namespace {
 
         stark::EnergyRigidBodyConstraints::AugmentedLagrangianParams params;
         params.enabled = true;
+        params.lagged_local_mode = env_flag("STARK_JOINT_AL_LAGGED_LOCAL_MODE", false);
+        params.post_corrector_enabled = env_flag("STARK_JOINT_AL_POST_CORRECTOR_ENABLED", true);
+        if (params.post_corrector_enabled) {
+            params.lagged_local_mode = false;
+        }
         params.adaptive_rho = env_flag("STARK_JOINT_AL_ADAPTIVE_RHO", true);
         params.rho0 = env_double("STARK_JOINT_AL_RHO0", 0.0);
         params.rho_update_ratio = env_double("STARK_JOINT_AL_RHO_UPDATE_RATIO", 1.5);
         params.sufficient_decrease_ratio = env_double("STARK_JOINT_AL_SUFFICIENT_DECREASE_RATIO", 0.9);
         params.max_outer_iterations = env_int("STARK_JOINT_AL_MAX_OUTER", 8);
         params.residual_smoothing = env_double("STARK_JOINT_AL_RESIDUAL_SMOOTHING", 1e-4);
+        params.post_corrector_max_iterations = env_int("STARK_JOINT_AL_POST_CORRECTOR_MAX_ITERS", 3);
+        params.post_corrector_relaxation = env_double("STARK_JOINT_AL_POST_CORRECTOR_RELAXATION", 0.8);
+        params.post_corrector_target_tolerance_ratio = env_double("STARK_JOINT_AL_POST_CORRECTOR_TARGET_TOL_RATIO", 0.1);
+        params.post_corrector_required_reduction_ratio = env_double("STARK_JOINT_AL_POST_CORRECTOR_REQUIRED_REDUCTION_RATIO", 1e-3);
+        params.post_corrector_contact_pairs_threshold = env_int_any("STARK_JOINT_AL_POST_CORRECTOR_CONTACT_PAIRS_THRESHOLD", 0);
+        params.post_corrector_min_gap_threshold = env_double("STARK_JOINT_AL_POST_CORRECTOR_MIN_GAP_THRESHOLD", 0.0);
 
         sim.rigidbodies->set_joint_augmented_lagrangian_params(params);
         return true;
@@ -132,6 +154,70 @@ namespace {
         return (max_v - min_v).cwiseMax(Eigen::Vector3d::Constant(1e-6));
     }
 
+    std::pair<Eigen::Vector3d, Eigen::Vector3d> compute_aabb_bounds(const std::vector<Eigen::Vector3d>& vertices)
+    {
+        Eigen::Vector3d min_v = Eigen::Vector3d::Constant(std::numeric_limits<double>::max());
+        Eigen::Vector3d max_v = Eigen::Vector3d::Constant(std::numeric_limits<double>::lowest());
+        for (const auto& v : vertices) {
+            min_v = min_v.cwiseMin(v);
+            max_v = max_v.cwiseMax(v);
+        }
+        return { min_v, max_v };
+    }
+
+    std::string resolve_model_path(const std::string& relative_path)
+    {
+        std::vector<std::string> candidates;
+        const std::string override_models_dir = env_string("STARK_MODELS_DIR", "");
+        const std::string override_chrono_data = env_string("STARK_CHRONO_DATA_DIR", "");
+
+        if (!override_models_dir.empty()) {
+            candidates.push_back(override_models_dir + "/" + relative_path);
+        }
+        candidates.push_back(kModelsDir + "/" + relative_path);
+
+        if (!override_chrono_data.empty()) {
+            candidates.push_back(override_chrono_data + "/models/" + relative_path);
+        }
+        candidates.push_back(kChronoDataDir + "/models/" + relative_path);
+
+        for (const auto& candidate : candidates) {
+            std::ifstream f(candidate);
+            if (f.good()) {
+                return candidate;
+            }
+        }
+
+        throw std::runtime_error("Missing model file: " + relative_path);
+    }
+
+    struct LocalizedMeshData
+    {
+        std::vector<Eigen::Vector3d> vertices;
+        std::vector<std::array<int, 3>> triangles;
+        Eigen::Vector3d min_v = Eigen::Vector3d::Zero();
+        Eigen::Vector3d max_v = Eigen::Vector3d::Zero();
+        Eigen::Vector3d aabb_size = Eigen::Vector3d::Ones();
+    };
+
+    LocalizedMeshData load_localized_obj_mesh(const std::string& path, double scale_factor, const Eigen::Vector3d& reference_point)
+    {
+        auto [vertices, triangles] = load_and_merge_obj_mesh(path, scale_factor);
+        const Eigen::Vector3d ref = reference_point * scale_factor;
+        for (auto& v : vertices) {
+            v -= ref;
+        }
+        const auto [min_v, max_v] = compute_aabb_bounds(vertices);
+
+        LocalizedMeshData out;
+        out.vertices = std::move(vertices);
+        out.triangles = std::move(triangles);
+        out.min_v = min_v;
+        out.max_v = max_v;
+        out.aabb_size = (max_v - min_v).cwiseMax(Eigen::Vector3d::Constant(1e-6));
+        return out;
+    }
+
     stark::RigidBody::Handler add_obj_rigidbody(
         stark::Simulation& sim,
         const std::string& output_label,
@@ -146,6 +232,59 @@ namespace {
         const double mass = std::max(1e-4, density * approx_volume);
         const Eigen::Matrix3d inertia = stark::inertia_tensor_box(mass, aabb_size);
         return sim.presets->rigidbodies->add(output_label, mass, inertia, vertices, triangles, contact_params);
+    }
+
+    stark::RigidBody::Handler add_localized_obj_rigidbody(
+        stark::Simulation& sim,
+        const std::string& output_label,
+        const std::string& obj_path,
+        double mass,
+        const Eigen::Vector3d& reference_point,
+        const stark::ContactParams& contact_params,
+        double scale_factor = 1.0)
+    {
+        const auto mesh = load_localized_obj_mesh(obj_path, scale_factor, reference_point);
+        const Eigen::Matrix3d inertia = stark::inertia_tensor_box(mass, mesh.aabb_size);
+        auto handler = sim.presets->rigidbodies->add(output_label, mass, inertia, mesh.vertices, mesh.triangles, contact_params);
+        handler.rigidbody.set_translation(reference_point * scale_factor);
+        return handler;
+    }
+
+    void append_mesh(
+        std::vector<Eigen::Vector3d>& vertices,
+        std::vector<std::array<int, 3>>& triangles,
+        const stark::Mesh<3>& mesh,
+        const Eigen::Vector3d& translation)
+    {
+        const int offset = (int)vertices.size();
+        vertices.reserve(vertices.size() + mesh.vertices.size());
+        triangles.reserve(triangles.size() + mesh.conn.size());
+        for (const auto& v : mesh.vertices) {
+            vertices.push_back(v + translation);
+        }
+        for (const auto& tri : mesh.conn) {
+            triangles.push_back({ tri[0] + offset, tri[1] + offset, tri[2] + offset });
+        }
+    }
+
+    stark::RigidBody::Handler add_compound_box_rigidbody(
+        stark::Simulation& sim,
+        const std::string& output_label,
+        double mass,
+        const std::vector<std::pair<Eigen::Vector3d, Eigen::Vector3d>>& size_and_center_local,
+        const Eigen::Vector3d& reference_point,
+        const stark::ContactParams& contact_params)
+    {
+        std::vector<Eigen::Vector3d> vertices;
+        std::vector<std::array<int, 3>> triangles;
+        for (const auto& part : size_and_center_local) {
+            const stark::Mesh<3> box_mesh = stark::make_box(part.first);
+            append_mesh(vertices, triangles, box_mesh, part.second);
+        }
+        const Eigen::Matrix3d inertia = stark::inertia_tensor_box(mass, compute_aabb_size(vertices));
+        auto handler = sim.presets->rigidbodies->add(output_label, mass, inertia, vertices, triangles, contact_params);
+        handler.rigidbody.set_translation(reference_point);
+        return handler;
     }
 
     Eigen::Vector3d make_planar_point(double x, double y)
@@ -380,6 +519,7 @@ void exp2_crank_slider_impact()
     const double joint_stiffness = env_double("STARK_EXP2_JOINT_STIFFNESS", 1e6);
     const double joint_tol_m = env_double("STARK_EXP2_JOINT_TOL_M", 1e-4);
     const double joint_tol_deg = env_double("STARK_EXP2_JOINT_TOL_DEG", 0.1);
+    const bool guide_al_enabled = env_flag("STARK_EXP2_GUIDE_AL_ENABLED", false);
     const double dt = env_double("STARK_EXP2_DT", 0.002);
     const double end_time = env_double("STARK_EXP2_END_TIME", 1.2);
     const double motor_w = env_double("STARK_EXP2_MOTOR_W", -3.0);
@@ -496,6 +636,7 @@ void exp2_crank_slider_impact()
     slider_guide.set_stiffness(joint_stiffness);
     slider_guide.set_tolerance_in_m(joint_tol_m);
     slider_guide.set_tolerance_in_deg(joint_tol_deg);
+    slider_guide.set_augmented_lagrangian_enabled(guide_al_enabled);
 
     auto angle_deg = [](const stark::RigidBodyHandler& rb) {
         const Eigen::Vector3d x_axis = rb.transform_local_to_global_direction(Eigen::Vector3d::UnitX());
@@ -1215,6 +1356,178 @@ void exp6_double_pendulum()
 
             prev_vcm = vcm;
             prev_t = t;
+        });
+
+    sim.run();
+}
+
+void exp7_forklift_lift()
+{
+    std::cout << "Running Exp 7: Forklift lift benchmark (STARK)..." << std::endl;
+
+    const std::string run_name = env_string("STARK_EXP7_RUN_NAME", "exp7_forklift_lift");
+    const double end_time = env_double("STARK_EXP7_END_TIME", 3.0);
+    const double dt = env_double("STARK_EXP7_DT", 5e-3);
+    const double lift_start = env_double("STARK_EXP7_LIFT_START", 0.25);
+    const double lift_end = env_double("STARK_EXP7_LIFT_END", 2.25);
+    const double lift_speed = env_double("STARK_EXP7_LIFT_SPEED", -0.08);
+    const double lift_max_force = env_double("STARK_EXP7_LIFT_MAX_FORCE", 2e4);
+    const double pallet_y = env_double("STARK_EXP7_PALLET_Y", 0.4);
+    const double pallet_z = env_double("STARK_EXP7_PALLET_Z", 3.0);
+    const double joint_stiffness = env_double("STARK_EXP7_JOINT_STIFFNESS", 1e6);
+    const double joint_tol_m = env_double("STARK_EXP7_JOINT_TOL_M", 1e-4);
+    const double joint_tol_deg = env_double("STARK_EXP7_JOINT_TOL_DEG", 0.1);
+    const bool guide_al_enabled = env_flag("STARK_EXP7_GUIDE_AL_ENABLED", false);
+    const bool joint_al_enabled = env_flag("STARK_JOINT_AL_ENABLED", false);
+    const double contact_thickness = env_double("STARK_EXP7_CONTACT_THICKNESS", 1e-3);
+    const double min_contact_stiffness = env_double("STARK_EXP7_MIN_CONTACT_STIFFNESS", 1e3);
+    const double ground_pallet_friction = env_double("STARK_EXP7_GROUND_PALLET_FRICTION", 0.5);
+    const double fork_pallet_friction = env_double("STARK_EXP7_FORK_PALLET_FRICTION", 0.4);
+    const bool contact_stiffness_update = env_flag("STARK_EXP7_CONTACT_STIFFNESS_UPDATE", true);
+    const bool contact_adaptive_scheduling = env_flag("STARK_EXP7_CONTACT_ADAPTIVE_SCHEDULING", joint_al_enabled);
+    const bool contact_inertia_consistent = env_flag("STARK_EXP7_CONTACT_INERTIA_CONSISTENT", false);
+    const bool adaptive_dt = env_flag("STARK_EXP7_ADAPTIVE_DT", true);
+
+    stark::Settings settings;
+    settings.output.simulation_name = run_name;
+    settings.output.output_directory = kOutputBase + "/" + run_name;
+    settings.output.codegen_directory = kCodegenDir;
+    settings.debug.symx_suppress_compiler_output = false;
+    settings.debug.symx_force_load = false;
+    settings.execution.end_simulation_time = end_time;
+    settings.simulation.gravity = { 0.0, -9.81, 0.0 };
+    settings.simulation.init_frictional_contact = true;
+    settings.simulation.use_adaptive_time_step = adaptive_dt;
+    settings.simulation.max_time_step_size = dt;
+    settings.newton.max_newton_iterations = 100;
+    configure_solver_from_env(settings);
+
+    stark::Simulation sim(settings);
+    sim.rigidbodies->set_default_constraint_stiffness(joint_stiffness);
+    sim.rigidbodies->set_default_constraint_distance_tolerance(joint_tol_m);
+    sim.rigidbodies->set_default_constraint_angle_tolerance(joint_tol_deg);
+    if (joint_al_enabled) {
+        configure_joint_al_from_env(sim);
+    }
+
+    auto global_contact = sim.interactions->contact->get_global_params();
+    global_contact.default_contact_thickness = contact_thickness;
+    global_contact.min_contact_stiffness = min_contact_stiffness;
+    global_contact.stiffness_update_enabled = contact_stiffness_update;
+    global_contact.adaptive_stiffness_scheduling = contact_adaptive_scheduling;
+    global_contact.inertia_consistent_kappa = contact_inertia_consistent;
+    sim.interactions->contact->set_global_params(global_contact);
+
+    stark::ContactParams contact_params;
+    contact_params.contact_thickness = contact_thickness;
+
+    const Eigen::Vector3d COG_truss(0.0, 0.4, 0.5);
+    const Eigen::Vector3d COG_arm(0.0, 1.300, 1.855);
+    const Eigen::Vector3d COG_fork(0.0, 0.362, 2.100);
+    const Eigen::Vector3d POS_pivotarm(0.0, 0.150, 1.855);
+    const Eigen::Vector3d POS_prismatic(0.0, 0.150, 1.855);
+    const Eigen::Vector3d pallet_pos(0.0, pallet_y, pallet_z);
+
+    auto ground = sim.presets->rigidbodies->add_box("forklift_ground", 1000.0, { 40.0, 2.0, 40.0 }, contact_params);
+    ground.handler.rigidbody.set_translation({ 0.0, -1.0, 0.0 });
+    sim.rigidbodies->add_constraint_fix(ground.handler.rigidbody).set_label("ground_fix");
+
+    const std::vector<std::pair<Eigen::Vector3d, Eigen::Vector3d>> chassis_boxes = {
+        { { 1.227, 1.621, 1.864 }, { -0.003, 1.019, 0.192 } },
+        { { 0.187, 0.773, 1.201 }, { 0.486, 0.153, -0.047 } },
+        { { 0.187, 0.773, 1.201 }, { -0.486, 0.153, -0.047 } },
+    };
+    auto chassis = add_compound_box_rigidbody(
+        sim, "forklift_chassis", 200.0, chassis_boxes, COG_truss, contact_params);
+    sim.rigidbodies->add_constraint_fix(chassis.rigidbody).set_label("chassis_fix");
+
+    auto arm = sim.presets->rigidbodies->add_box("forklift_arm", 100.0, { 0.9, 2.2, 0.31 }, contact_params);
+    arm.handler.rigidbody.set_translation(COG_arm);
+
+    const std::vector<std::pair<Eigen::Vector3d, Eigen::Vector3d>> fork_boxes = {
+        { { 0.100, 0.032, 1.033 }, { -0.352, -0.312, 0.613 } },
+        { { 0.100, 0.032, 1.033 }, { 0.352, -0.312, 0.613 } },
+        { { 0.344, 1.134, 0.101 }, { 0.0, 0.321, -0.009 } },
+    };
+    auto fork = add_compound_box_rigidbody(
+        sim, "forklift_fork", 60.0, fork_boxes, COG_fork, contact_params);
+    auto pallet = add_obj_rigidbody(
+        sim, "forklift_pallet", resolve_model_path("pallet.obj"), 300.0, 1.0, contact_params);
+    pallet.rigidbody.set_translation(pallet_pos);
+
+    sim.interactions->contact->disable_collision(ground.handler.contact, chassis.contact);
+    sim.interactions->contact->disable_collision(ground.handler.contact, arm.handler.contact);
+    sim.interactions->contact->disable_collision(chassis.contact, arm.handler.contact);
+    sim.interactions->contact->disable_collision(chassis.contact, fork.contact);
+    sim.interactions->contact->disable_collision(arm.handler.contact, fork.contact);
+    sim.interactions->contact->disable_collision(chassis.contact, pallet.contact);
+    sim.interactions->contact->disable_collision(arm.handler.contact, pallet.contact);
+    sim.interactions->contact->set_friction(ground.handler.contact, pallet.contact, ground_pallet_friction);
+    sim.interactions->contact->set_friction(fork.contact, pallet.contact, fork_pallet_friction);
+
+    sim.rigidbodies->add_constraint_fix(arm.handler.rigidbody).set_label("arm_fix");
+
+    auto fork_lift = sim.rigidbodies->add_constraint_prismatic_press(
+        fork.rigidbody,
+        arm.handler.rigidbody,
+        POS_prismatic,
+        Eigen::Vector3d::UnitY(),
+        0.0,
+        lift_max_force);
+    fork_lift.set_label("fork_lift");
+    fork_lift.set_stiffness(joint_stiffness);
+    fork_lift.set_tolerance_in_m(joint_tol_m);
+    fork_lift.set_tolerance_in_deg(joint_tol_deg);
+    fork_lift.set_augmented_lagrangian_enabled(guide_al_enabled);
+
+    const auto pallet_mesh = load_localized_obj_mesh(resolve_model_path("pallet.obj"), 1.0, Eigen::Vector3d::Zero());
+    const double fork_tine_top_local = -0.296;
+
+    {
+        std::string dir = sim.get_settings().output.output_directory;
+        std::ofstream f(dir + "/forklift_state.csv", std::ios::trunc);
+        f << "t,target_lift_v,fork_cx,fork_cy,fork_cz,fork_vx,fork_vy,fork_vz,"
+             "pallet_cx,pallet_cy,pallet_cz,pallet_vx,pallet_vy,pallet_vz,"
+             "fork_top_y,pallet_bottom_y,vertical_gap,actuator_force_proxy\n";
+    }
+
+    sim.add_time_event(
+        0.0,
+        settings.execution.end_simulation_time,
+         [&sim,
+         fork_rb = fork.rigidbody,
+         pallet_rb = pallet.rigidbody,
+         fork_lift,
+         fork_top_y_local = fork_tine_top_local,
+         pallet_bottom_y_local = pallet_mesh.min_v.y(),
+         lift_start,
+         lift_end,
+         lift_speed](double t) mutable {
+            const double target_v = (t >= lift_start && t <= lift_end) ? lift_speed : 0.0;
+            fork_lift.get_linear_velocity_constraint().set_target_velocity(target_v);
+
+            const Eigen::Vector3d fork_x = fork_rb.get_translation();
+            const Eigen::Vector3d fork_v = fork_rb.get_velocity();
+            const Eigen::Vector3d pallet_x = pallet_rb.get_translation();
+            const Eigen::Vector3d pallet_v = pallet_rb.get_velocity();
+            const double fork_top_y = fork_x.y() + fork_top_y_local;
+            const double pallet_bottom_y = pallet_x.y() + pallet_bottom_y_local;
+            const double vertical_gap = pallet_bottom_y - fork_top_y;
+            const double actuator_force_proxy =
+                fork_lift.get_linear_velocity_constraint().get_signed_velocity_violation_and_force()[1];
+
+            std::string dir = sim.get_settings().output.output_directory;
+            std::ofstream f(dir + "/forklift_state.csv", std::ios::app);
+            f << t << ","
+              << target_v << ","
+              << fork_x.x() << "," << fork_x.y() << "," << fork_x.z() << ","
+              << fork_v.x() << "," << fork_v.y() << "," << fork_v.z() << ","
+              << pallet_x.x() << "," << pallet_x.y() << "," << pallet_x.z() << ","
+              << pallet_v.x() << "," << pallet_v.y() << "," << pallet_v.z() << ","
+              << fork_top_y << ","
+              << pallet_bottom_y << ","
+              << vertical_gap << ","
+              << actuator_force_proxy << "\n";
         });
 
     sim.run();

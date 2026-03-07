@@ -98,6 +98,7 @@ namespace stark
 			std::vector<Eigen::Vector3d> al_lambda_vec;
 			std::vector<double> al_rho;
 			std::vector<double> al_prev_violation;
+			std::vector<double> al_enabled;
 			std::vector<double> tolerance_in_m;
 			std::vector<double> is_active;
 			std::vector<std::string> labels;
@@ -111,6 +112,7 @@ namespace stark
 				this->al_lambda_vec.push_back(Eigen::Vector3d::Zero());
 				this->al_rho.push_back(stiffness);
 				this->al_prev_violation.push_back(std::numeric_limits<double>::infinity());
+				this->al_enabled.push_back(1.0);
 				this->tolerance_in_m.push_back(tolerance_in_m);
 				this->is_active.push_back(1.0);
 				this->labels.push_back("");
@@ -144,6 +146,7 @@ namespace stark
 			std::vector<Eigen::Vector3d> al_lambda_vec;
 			std::vector<double> al_rho;
 			std::vector<double> al_prev_violation;
+			std::vector<double> al_enabled;
 			std::vector<double> tolerance_in_deg;
 			std::vector<double> is_active;
 			std::vector<std::string> labels;
@@ -159,6 +162,7 @@ namespace stark
 				this->al_lambda_vec.push_back(Eigen::Vector3d::Zero());
 				this->al_rho.push_back(stiffness);
 				this->al_prev_violation.push_back(std::numeric_limits<double>::infinity());
+				this->al_enabled.push_back(1.0);
 				this->tolerance_in_deg.push_back(tolerance_in_deg);
 				this->is_active.push_back(1.0);
 				this->labels.push_back("");
@@ -194,6 +198,7 @@ namespace stark
 			std::vector<Eigen::Vector3d> al_lambda_vec;
 			std::vector<double> al_rho;
 			std::vector<double> al_prev_violation;
+			std::vector<double> al_enabled;
 			std::vector<double> tolerance_in_m;
 			std::vector<double> is_active;
 			std::vector<std::string> labels;
@@ -208,6 +213,7 @@ namespace stark
 				this->al_lambda_vec.push_back(Eigen::Vector3d::Zero());
 				this->al_rho.push_back(stiffness);
 				this->al_prev_violation.push_back(std::numeric_limits<double>::infinity());
+				this->al_enabled.push_back(1.0);
 				this->tolerance_in_m.push_back(tolerance_in_m);
 				this->is_active.push_back(1.0);
 				this->labels.push_back("");
@@ -238,6 +244,7 @@ namespace stark
 			std::vector<double> al_lambda;
 			std::vector<double> al_rho;
 			std::vector<double> al_prev_violation;
+			std::vector<double> al_enabled;
 			std::vector<double> tolerance_in_m;
 			std::vector<double> is_active;
 			std::vector<std::string> labels;
@@ -251,6 +258,7 @@ namespace stark
 				this->al_lambda.push_back(0.0);
 				this->al_rho.push_back(stiffness);
 				this->al_prev_violation.push_back(std::numeric_limits<double>::infinity());
+				this->al_enabled.push_back(1.0);
 				this->tolerance_in_m.push_back(tolerance_in_m);
 				this->is_active.push_back(1.0);
 				this->labels.push_back("");
@@ -280,6 +288,7 @@ namespace stark
 			std::vector<double> al_lambda;
 			std::vector<double> al_rho;
 			std::vector<double> al_prev_violation;
+			std::vector<double> al_enabled;
 			std::vector<double> tolerance_in_m;
 			std::vector<double> is_active;
 			std::vector<std::string> labels;
@@ -294,6 +303,7 @@ namespace stark
 				this->al_lambda.push_back(0.0);
 				this->al_rho.push_back(stiffness);
 				this->al_prev_violation.push_back(std::numeric_limits<double>::infinity());
+				this->al_enabled.push_back(1.0);
 				this->tolerance_in_m.push_back(tolerance_in_m);
 				this->is_active.push_back(1.0);
 				this->labels.push_back("");
@@ -326,6 +336,7 @@ namespace stark
 			std::vector<double> al_lambda;
 			std::vector<double> al_rho;
 			std::vector<double> al_prev_violation;
+			std::vector<double> al_enabled;
 			std::vector<double> tolerance_in_m;
 			std::vector<double> is_active;
 			std::vector<std::string> labels;
@@ -340,6 +351,7 @@ namespace stark
 				this->al_lambda.push_back(0.0);
 				this->al_rho.push_back(stiffness);
 				this->al_prev_violation.push_back(std::numeric_limits<double>::infinity());
+				this->al_enabled.push_back(1.0);
 				this->tolerance_in_m.push_back(tolerance_in_m);
 				this->is_active.push_back(1.0);
 				this->labels.push_back("");
@@ -385,6 +397,7 @@ namespace stark
 			std::vector<Eigen::Vector3d> al_lambda_vec;
 			std::vector<double> al_rho;
 			std::vector<double> al_prev_violation;
+			std::vector<double> al_enabled;
 			std::vector<double> tolerance_in_deg;
 			std::vector<double> is_active;
 			std::vector<std::string> labels;
@@ -399,6 +412,7 @@ namespace stark
 				this->al_lambda_vec.push_back(Eigen::Vector3d::Zero());
 				this->al_rho.push_back(stiffness);
 				this->al_prev_violation.push_back(std::numeric_limits<double>::infinity());
+				this->al_enabled.push_back(1.0);
 				this->tolerance_in_deg.push_back(tolerance_in_deg);
 				this->is_active.push_back(1.0);
 				this->labels.push_back("");
@@ -437,6 +451,7 @@ namespace stark
 			std::vector<double> al_lambda;
 			std::vector<double> al_rho;
 			std::vector<double> al_prev_violation;
+			std::vector<double> al_enabled;
 			std::vector<double> tolerance_in_deg;
 			std::vector<double> is_active;
 			std::vector<std::string> labels;
@@ -450,6 +465,7 @@ namespace stark
 				this->al_lambda.push_back(0.0);
 				this->al_rho.push_back(stiffness);
 				this->al_prev_violation.push_back(std::numeric_limits<double>::infinity());
+				this->al_enabled.push_back(1.0);
 				this->tolerance_in_deg.push_back(tolerance_in_deg);
 				this->is_active.push_back(1.0);
 				this->labels.push_back("");

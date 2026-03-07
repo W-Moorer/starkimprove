@@ -43,12 +43,20 @@ namespace stark
 		struct AugmentedLagrangianParams
 		{
 			bool enabled = false;
+			bool lagged_local_mode = true;        // Use previous accepted-step AL state during the current solve; update lambda/rho only after accepting the step
+			bool post_corrector_enabled = true;   // Use a soft/contact predictor and apply a local KKT-like post-corrector only after accepting the step
 			bool adaptive_rho = false;           // Fixed rho when false
 			double rho0 = 0.0;                   // <= 0 initializes rho from each constraint stiffness
 			double rho_update_ratio = 1.5;       // Multiplicative rho increase for adaptive mode
 			double sufficient_decrease_ratio = 0.9; // Increase rho when violation decrease is insufficient
 			int max_outer_iterations = 8;        // Max AL outer loops before fallback hardening
 			double residual_smoothing = 1e-4;    // Smooth norm residual to avoid singular Hessians at zero violation
+			int post_corrector_max_iterations = 3;
+			double post_corrector_relaxation = 0.8;
+			double post_corrector_target_tolerance_ratio = 0.1;
+			double post_corrector_required_reduction_ratio = 1e-3;
+			int post_corrector_contact_pairs_threshold = 0;
+			double post_corrector_min_gap_threshold = 0.0;
 		};
 
         EnergyRigidBodyConstraints(core::Stark& stark, const spRigidBodyDynamics rb);
@@ -85,9 +93,11 @@ namespace stark
 		int last_joint_active_constraints = 0;
 
         /* Methods */
-		bool _adjust_constraints_stiffness_and_log(core::Stark& stark, double cap, double multiplier, bool are_positions_set);
+		bool _adjust_constraints_stiffness_and_log(core::Stark& stark, double cap, double multiplier, bool are_positions_set, bool update_metrics = true);
 		void _initialize_al_state_if_needed();
 		bool _run_augmented_lagrangian_outer_iteration(core::Stark& stark, bool are_positions_set);
+		void _update_lagged_augmented_lagrangian_state(core::Stark& stark);
+		void _apply_contact_consistent_local_kkt_corrector(core::Stark& stark);
 		void _log_joint_metrics(core::Stark& stark) const;
 
 		// SymX callbacks
