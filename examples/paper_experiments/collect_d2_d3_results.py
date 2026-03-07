@@ -12,6 +12,13 @@ import pandas as pd
 
 from study_utils import FIGS_DIR, OUTPUT_BASE, latest_logger, parse_logger_metrics, save_fig, setup_axes
 
+DISPLAY_NAME = {
+    "full": "Contact-consistent IPC",
+    "gap_only": "Gap-ratio-only schedule",
+    "fixed_rate": "Fixed-rate hardening baseline",
+    "fixed_soft": "Low fixed-kappa baseline",
+}
+
 
 def collect_case(case_dir: Path, label: str, extra: Dict[str, object] | None = None) -> Dict[str, object]:
     logger = latest_logger(case_dir)
@@ -19,7 +26,8 @@ def collect_case(case_dir: Path, label: str, extra: Dict[str, object] | None = N
         raise FileNotFoundError(f"Missing logger in {case_dir}")
     metrics = parse_logger_metrics(logger)
     row: Dict[str, object] = {
-        "label": label,
+        "label": DISPLAY_NAME.get(label, label),
+        "label_id": label,
         "case_dir": case_dir.name,
         "logger_file": logger.name,
         "total": metrics.get("total"),
@@ -32,6 +40,10 @@ def collect_case(case_dir: Path, label: str, extra: Dict[str, object] | None = N
     if extra:
         row.update(extra)
     return row
+
+
+def format_d3_label(variant: str, mass_ratio: int) -> str:
+    return f"{DISPLAY_NAME[variant]} (MR={mass_ratio})"
 
 
 def write_csv(rows: List[Dict[str, object]], path: Path):
@@ -72,8 +84,8 @@ def plot_d3(rows: List[Dict[str, object]], fig_dir: Path):
         ax.set_xscale("log")
     for variant, color in [("full", "#1f77b4"), ("fixed_rate", "#d62728")]:
         sub = df[df["variant"] == variant].sort_values("mass_ratio")
-        axs[0].plot(sub["mass_ratio"], sub["total"], marker="o", color=color, label=variant)
-        axs[1].plot(sub["mass_ratio"], sub["hardening_count"], marker="o", color=color, label=variant)
+        axs[0].plot(sub["mass_ratio"], sub["total"], marker="o", color=color, label=DISPLAY_NAME[variant])
+        axs[1].plot(sub["mass_ratio"], sub["hardening_count"], marker="o", color=color, label=DISPLAY_NAME[variant])
     axs[0].set_xlabel("Mass ratio")
     axs[0].set_ylabel("Runtime (s)")
     axs[0].set_title("D3: Runtime vs Mass Ratio")
@@ -107,13 +119,22 @@ def main() -> int:
     d3_rows: List[Dict[str, object]] = []
     for ratio in [1, 10, 100, 1000]:
         d3_rows.append(
-            collect_case(OUTPUT_BASE / f"exp1_mr{ratio}_full", f"mr{ratio}_full", {"mass_ratio": ratio, "variant": "full"})
+            collect_case(
+                OUTPUT_BASE / f"exp1_mr{ratio}_full",
+                f"mr{ratio}_full",
+                {"mass_ratio": ratio, "variant": "full", "method": DISPLAY_NAME["full"], "label": format_d3_label("full", ratio)},
+            )
         )
         d3_rows.append(
             collect_case(
                 OUTPUT_BASE / f"exp1_mr{ratio}_fixed_rate",
                 f"mr{ratio}_fixed_rate",
-                {"mass_ratio": ratio, "variant": "fixed_rate"},
+                {
+                    "mass_ratio": ratio,
+                    "variant": "fixed_rate",
+                    "method": DISPLAY_NAME["fixed_rate"],
+                    "label": format_d3_label("fixed_rate", ratio),
+                },
             )
         )
     write_csv(d3_rows, args.out_d3_csv.resolve())

@@ -15,17 +15,13 @@ import pandas as pd
 from study_utils import FIGS_DIR, OUTPUT_BASE, latest_logger, parse_logger_metrics, resolve_executable, save_fig, setup_axes
 
 
-def stark_env(run_name: str, dt: float, end_time: float, limit_deg: float, use_al: bool, hard_stop_projection: bool) -> Dict[str, str]:
+def stark_env(run_name: str, dt: float, end_time: float, limit_deg: float, hard_stop_projection: bool) -> Dict[str, str]:
     env = dict(os.environ)
     env["STARK_EXP3_RUN_NAME"] = run_name
     env["STARK_EXP3_DT"] = f"{dt:.12g}"
     env["STARK_EXP3_END_TIME"] = f"{end_time:.12g}"
     env["STARK_EXP3_LIMIT_DEG"] = f"{limit_deg:.12g}"
     env["STARK_EXP3_STOP_PROJECTION_ENABLED"] = "1" if hard_stop_projection else "0"
-    if use_al:
-        env["STARK_JOINT_AL_ENABLED"] = "1"
-    else:
-        env.pop("STARK_JOINT_AL_ENABLED", None)
     return env
 
 
@@ -63,15 +59,15 @@ def first_trigger_time(df: pd.DataFrame, threshold: float) -> float | None:
     return float(active["t"].iloc[0])
 
 
-def run_case(exe: Path, dt: float, end_time: float, limit_deg: float, use_al: bool, force_run: bool, hard_stop_projection: bool) -> Dict[str, object]:
-    method = "al" if use_al else "soft"
-    pretty = "AL-IPC" if use_al else "soft"
+def run_case(exe: Path, dt: float, end_time: float, limit_deg: float, force_run: bool, hard_stop_projection: bool) -> Dict[str, object]:
+    method = "stark"
+    pretty = "STARK hard-stop IPC" if hard_stop_projection else "STARK IPC"
     suffix = "_hardstop" if hard_stop_projection else ""
     run_name = f"exp3_limit_stop_a3_{method}{suffix}"
     case_dir = OUTPUT_BASE / run_name
     logger = latest_logger(case_dir)
     if force_run or logger is None:
-        env = stark_env(run_name, dt, end_time, limit_deg, use_al, hard_stop_projection)
+        env = stark_env(run_name, dt, end_time, limit_deg, hard_stop_projection)
         print(f"[a3] run {run_name}")
         ret = subprocess.run([str(exe), "exp3"], cwd=exe.parents[3], env=env)
         if ret.returncode != 0:
@@ -194,7 +190,7 @@ def plot_curves(rows: List[Dict[str, object]], fig_dir: Path, limit_deg: float):
     for ax in axs:
         setup_axes(ax)
 
-    palette = {"soft": "#e377c2", "AL-IPC": "#1f77b4", "NSC/APGD": "#2ca02c", "SMC": "#d62728"}
+    palette = {"STARK hard-stop IPC": "#1f77b4", "STARK IPC": "#1f77b4", "NSC/APGD": "#2ca02c", "SMC": "#d62728"}
     for row in rows:
         state = load_state(Path(row["state_csv"]))
         axs[0].plot(state["t"], _smooth(state["theta_deg"]), color=palette[row["method"]], label=row["method"])
@@ -216,7 +212,7 @@ def plot_curves(rows: List[Dict[str, object]], fig_dir: Path, limit_deg: float):
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run/collect A3 limit-stop hinge study.")
+    parser = argparse.ArgumentParser(description="Run/collect A3 limit-stop hinge study under the contact-centric paper framing.")
     parser.add_argument("--exe", type=Path, default=None)
     parser.add_argument("--dt", type=float, default=1e-3)
     parser.add_argument("--end-time", type=float, default=2.0)
@@ -233,8 +229,7 @@ def main() -> int:
     args = parse_args()
     exe = resolve_executable(args.exe)
     rows = [
-        run_case(exe, args.dt, args.end_time, args.limit_deg, False, args.force_run, args.hard_stop_projection),
-        run_case(exe, args.dt, args.end_time, args.limit_deg, True, args.force_run, args.hard_stop_projection),
+        run_case(exe, args.dt, args.end_time, args.limit_deg, args.force_run, args.hard_stop_projection),
     ]
     if args.pychrono_mode != "none":
         rows.append(run_pychrono_case(args.dt, args.end_time, args.limit_deg, "nsc_ncp", args.force_run))

@@ -1,186 +1,103 @@
 {
-  "phase": "Phase0",
-  "frozen_on": "2026-03-06",
+  "phase": "ContactTrack",
+  "frozen_on": "2026-03-07",
+  "paper_line": "contact_consistent_ipc",
   "source_design_docs": [
-    "documents/local/paper1/design/02_execution_plan.md",
-    "documents/local/paper1/design/03_backup_migration_map.md"
+    "documents/local/paper1/cmame_proposal_al_ipc_stark.tex",
+    "documents/local/paper1/cmame_first_draft_zh.tex"
   ],
-  "mvp_scope": [
+  "scope": [
     {
       "id": "A1",
-      "name": "four_bar_closed_loop",
-      "objective": "Validate bilateral joint closure accuracy and long-horizon drift.",
-      "status": "completed_seed_scene_exp4_refresh_2026_03_06",
+      "name": "four_bar_and_chain10_verification",
+      "objective": "Structural verification only; no longer used as the main innovation proof.",
       "comparison": [
-        "stark_soft_constraint_baseline",
-        "al_ipc_target"
+        "stark_soft_joint_baseline",
+        "contact_tuned_variant_if_needed"
       ],
       "artifacts": [
-        "output/paper_experiments/phase0_baseline_minlog.csv",
-        "documents/local/paper1/figs/a1_joint_drift_compare.pdf"
-      ],
-      "scan_ranges": {
-        "delta_t": [
-          0.001,
-          0.0005,
-          0.0002,
-          0.0001
-        ],
-        "rho0": [
-          100.0,
-          1000.0,
-          10000.0
-        ],
-        "rho_update_ratio": [
-          1.2,
-          1.5,
-          2.0
-        ]
-      },
-      "target_thresholds": {
-        "joint_error_max_l2": 0.0001,
-        "contact_gap_min": 0.0
-      }
+        "documents/local/paper1/figs/a1_fourbar_dt_sweep.pdf",
+        "documents/local/paper1/figs/a1_chain10_joint_drift_compare.pdf"
+      ]
     },
     {
       "id": "A2",
       "name": "slider_crank_with_ground_contact",
-      "objective": "Evaluate joint-contact coupling under unified error criteria.",
-      "status": "completed_seed_scene_exp2_2026_03_05",
+      "objective": "Main matched-error contact comparison against PyChrono NSC/SMC.",
       "comparison": [
-        "stark_soft_constraint_baseline",
+        "stark_ipc",
         "pychrono_nsc_apgd",
         "pychrono_smc"
       ],
       "artifacts": [
-        "output/paper_experiments/phase0_baseline_minlog.csv",
-        "documents/local/paper1/figs/exp2_impact.pdf"
+        "output/paper_experiments/a2_crank_slider_summary.csv",
+        "documents/local/paper1/figs/a2_crank_slider_compare.pdf"
+      ]
+    },
+    {
+      "id": "A3",
+      "name": "limit_stop_switching",
+      "objective": "Validate accepted-step contact switching with hard-stop projection.",
+      "comparison": [
+        "stark_hard_stop_ipc",
+        "pychrono_nsc_apgd"
       ],
-      "scan_ranges": {
-        "delta_t": [
-          0.001,
-          0.0005,
-          0.0002,
-          0.0001
-        ],
-        "solver_tol": [
-          0.001,
-          0.0001,
-          1e-05
-        ]
-      },
-      "target_thresholds": {
-        "joint_error_max_l2": 0.0001,
-        "contact_gap_min": 0.0
-      }
+      "artifacts": [
+        "output/paper_experiments/a3_limit_stop_summary.csv",
+        "documents/local/paper1/figs/a3_limit_stop_compare.pdf"
+      ]
     },
     {
       "id": "D1",
-      "name": "parameter_sensitivity_baseline",
-      "objective": "Generate error-cost Pareto seeds and failure-rate statistics.",
-      "status": "completed_sweep_exp4_al_2026_03_05",
+      "name": "contact_parameter_pareto",
+      "objective": "Sweep contact parameters on exp7 and build the error-cost Pareto seeds.",
       "artifacts": [
         "output/paper_experiments/d1_parameter_sensitivity.csv",
         "documents/local/paper1/figs/d1_pareto_total_vs_error.pdf"
       ],
       "scan_ranges": {
-        "rho0": [
-          100.0,
-          1000.0,
-          10000.0
-        ],
-        "rho_update_ratio": [
-          1.2,
-          1.5,
-          2.0
-        ],
-        "newton_tol": [
-          0.001,
-          0.0001,
-          1e-05
-        ],
-        "linear_tol": [
-          1.0,
-          0.1,
-          0.01
-        ]
+        "min_contact_stiffness": [100.0, 1000.0, 10000.0],
+        "adaptive_scheduling": [false, true],
+        "inertia_consistent": [false, true],
+        "newton_tol": [0.001, 0.0001],
+        "linear_tol": [1.0, 0.1]
       }
+    },
+    {
+      "id": "D2",
+      "name": "double_stiffness_complete_ablation",
+      "objective": "Primary ablation for inertia-aware initialization and active-set-stable scheduling.",
+      "artifacts": [
+        "output/paper_experiments/d2_complete_ablation.csv",
+        "documents/local/paper1/figs/d2_complete_ablation.pdf"
+      ]
+    },
+    {
+      "id": "D3",
+      "name": "mass_ratio_sweep",
+      "objective": "Cross-scale robustness evidence for the contact-centric scheduling policy.",
+      "artifacts": [
+        "output/paper_experiments/d3_mass_ratio_sweep.csv",
+        "documents/local/paper1/figs/d3_mass_ratio_sweep.pdf"
+      ]
+    },
+    {
+      "id": "S1",
+      "name": "exp5_threaded_contact",
+      "objective": "Complex persistent contact benchmark referenced to RecurDyn.",
+      "artifacts": [
+        "output/paper_experiments/exp5_complex_contact_summary.csv",
+        "documents/local/paper1/figs/exp5_bolt_vs_ref.pdf"
+      ]
+    },
+    {
+      "id": "S2",
+      "name": "exp7_forklift",
+      "objective": "Contact-dominant insertion and carrying benchmark with PyChrono reference.",
+      "artifacts": [
+        "output/paper_experiments/exp7_forklift_summary.csv",
+        "documents/local/paper1/figs/exp7_forklift_compare.pdf"
+      ]
     }
-  ],
-  "backup_migration_scope": [
-    "double_stiffness_rule",
-    "exp1_stack20_ablation",
-    "exp2_high_speed_impact",
-    "exp4_coupled_joints",
-    "exp5_bolt_from_models"
-  ],
-  "stark_baseline_runset": [
-    {
-      "id": "D2_seed_stack20",
-      "experiment_arg": "exp1",
-      "expected_output_dirs": [
-        "exp1_adaptive",
-        "exp1_gap_adaptive",
-        "exp1_fixed_soft"
-      ],
-      "purpose": "Seed baseline for stiffness scheduling comparisons."
-    },
-    {
-      "id": "A2_seed_contact",
-      "experiment_arg": "exp2",
-      "expected_output_dirs": [
-        "exp2_v10",
-        "exp2_v100",
-        "exp2_v500"
-      ],
-      "purpose": "Current contact-dominant baseline from high-speed impact."
-    },
-    {
-      "id": "A1_seed_joint_contact",
-      "experiment_arg": "exp4_fourbar",
-      "env": {
-        "STARK_EXP4_RUN_NAME": "exp4_fourbar_a1fix_soft"
-      },
-      "expected_output_dirs": [
-        "exp4_fourbar_a1fix_soft"
-      ],
-      "purpose": "MVP A1 representative four-bar baseline scene (refreshed isolated soft run)."
-    },
-    {
-      "id": "A1_seed_joint_contact_al",
-      "experiment_arg": "exp4_fourbar",
-      "env": {
-        "STARK_JOINT_AL_ENABLED": "1",
-        "STARK_EXP4_RUN_NAME": "exp4_fourbar_a1fix_al"
-      },
-      "expected_output_dirs": [
-        "exp4_fourbar_a1fix_al"
-      ],
-      "purpose": "MVP A1 four-bar AL companion scene bound to refreshed isolated single-run outputs."
-    },
-    {
-      "id": "A5_seed_thread_contact",
-      "experiment_arg": "exp5",
-      "expected_output_dirs": [
-        "exp5_bolt"
-      ],
-      "purpose": "Threaded contact baseline from CAD meshes."
-    }
-  ],
-  "minimal_log_fields": [
-    "total",
-    "time_steps",
-    "newton_iterations",
-    "linear_iterations",
-    "cg_iterations",
-    "hardening_count",
-    "failed_step_count",
-    "line_search_iterations",
-    "failed_step_time",
-    "failed_steps",
-    "line_search",
-    "before_energy_evaluation",
-    "evaluate_e_grad_hess",
-    "write_frame"
   ]
 }

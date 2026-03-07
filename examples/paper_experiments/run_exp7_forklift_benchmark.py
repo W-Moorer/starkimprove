@@ -26,7 +26,10 @@ def stark_env(
     pallet_z: float,
     ground_pallet_friction: float,
     fork_pallet_friction: float,
-    use_al: bool,
+    min_contact_stiffness: float,
+    contact_stiffness_update: bool,
+    contact_adaptive_scheduling: bool,
+    contact_inertia_consistent: bool,
 ) -> Dict[str, str]:
     env = dict(os.environ)
     env["STARK_EXP7_RUN_NAME"] = run_name
@@ -39,11 +42,11 @@ def stark_env(
     env["STARK_EXP7_PALLET_Z"] = f"{pallet_z:.12g}"
     env["STARK_EXP7_GROUND_PALLET_FRICTION"] = f"{ground_pallet_friction:.12g}"
     env["STARK_EXP7_FORK_PALLET_FRICTION"] = f"{fork_pallet_friction:.12g}"
+    env["STARK_EXP7_MIN_CONTACT_STIFFNESS"] = f"{min_contact_stiffness:.12g}"
+    env["STARK_EXP7_CONTACT_STIFFNESS_UPDATE"] = "1" if contact_stiffness_update else "0"
+    env["STARK_EXP7_CONTACT_ADAPTIVE_SCHEDULING"] = "1" if contact_adaptive_scheduling else "0"
+    env["STARK_EXP7_CONTACT_INERTIA_CONSISTENT"] = "1" if contact_inertia_consistent else "0"
     env["STARK_EXP7_ADAPTIVE_DT"] = "1"
-    if use_al:
-        env["STARK_JOINT_AL_ENABLED"] = "1"
-    else:
-        env.pop("STARK_JOINT_AL_ENABLED", None)
     return env
 
 
@@ -130,7 +133,11 @@ def run_stark_case(
     pallet_z: float,
     ground_pallet_friction: float,
     fork_pallet_friction: float,
-    use_al: bool,
+    min_contact_stiffness: float,
+    contact_stiffness_update: bool,
+    contact_adaptive_scheduling: bool,
+    contact_inertia_consistent: bool,
+    method_label: str,
     force_run: bool,
 ) -> Dict[str, object]:
     case_dir = OUTPUT_BASE / run_name
@@ -148,7 +155,10 @@ def run_stark_case(
             pallet_z,
             ground_pallet_friction,
             fork_pallet_friction,
-            use_al,
+            min_contact_stiffness,
+            contact_stiffness_update,
+            contact_adaptive_scheduling,
+            contact_inertia_consistent,
         )
         print(f"[exp7] run STARK {run_name}")
         ret = subprocess.run(cmd, cwd=exe.parents[3], env=env)
@@ -163,7 +173,7 @@ def run_stark_case(
     status = classify_state(state, end_time, dt)
     return {
         "framework": "STARK",
-        "method": "AL-IPC" if use_al else "soft",
+        "method": method_label,
         "run_name": run_name,
         "logger_file": logger.name,
         "total": metrics.get("total"),
@@ -173,6 +183,10 @@ def run_stark_case(
         "state_csv": str(state_csv),
         "final_pallet_y": float(state["pallet_cy"].iloc[-1]) if not state.empty else None,
         "final_pallet_z": float(state["pallet_cz"].iloc[-1]) if not state.empty else None,
+        "min_contact_stiffness": min_contact_stiffness,
+        "contact_stiffness_update": int(contact_stiffness_update),
+        "contact_adaptive_scheduling": int(contact_adaptive_scheduling),
+        "contact_inertia_consistent": int(contact_inertia_consistent),
         "status": status,
     }
 
@@ -264,8 +278,8 @@ def plot_curves(rows: List[Dict[str, object]], fig_dir: Path):
     for ax in axs:
         setup_axes(ax)
     palette = {
-        "soft": "#e377c2",
-        "AL-IPC": "#1f77b4",
+        "STARK fixed-kappa baseline": "#e377c2",
+        "STARK contact-consistent IPC": "#1f77b4",
         "NSC/PSOR": "#2ca02c",
         "SMC": "#d62728",
     }
@@ -291,7 +305,7 @@ def plot_curves(rows: List[Dict[str, object]], fig_dir: Path):
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run and compare STARK/PyChrono fixed-base forklift benchmark.")
+    parser = argparse.ArgumentParser(description="Run and compare STARK/PyChrono fixed-base forklift benchmark under the contact-centric paper framing.")
     parser.add_argument("--exe", type=Path, default=None)
     parser.add_argument("--dt", type=float, default=0.005)
     parser.add_argument("--ref-dt", type=float, default=0.0025)
@@ -303,6 +317,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--pallet-z", type=float, default=3.02)
     parser.add_argument("--ground-pallet-friction", type=float, default=0.1)
     parser.add_argument("--fork-pallet-friction", type=float, default=0.1)
+    parser.add_argument("--stark-min-contact-stiffness", type=float, default=1e3)
     parser.add_argument("--pychrono-nsc-compliance", type=float, default=1e-3)
     parser.add_argument("--pychrono-solver-max-iters", type=int, default=800)
     parser.add_argument("--pychrono-solver-tol", type=float, default=1e-10)
@@ -328,18 +343,24 @@ def main() -> int:
         args.pallet_z,
         args.ground_pallet_friction,
         args.fork_pallet_friction,
+        args.stark_min_contact_stiffness,
         True,
+        True,
+        True,
+        "STARK contact-consistent",
         args.force_run,
     )
     ref_state = load_state(Path(ref_row["state_csv"]))
 
     rows = [
         run_stark_case(
-            exe, "exp7_forklift_soft", args.dt, args.end_time, args.lift_start, args.lift_end, args.lift_speed,
-            args.pallet_y, args.pallet_z, args.ground_pallet_friction, args.fork_pallet_friction, False, args.force_run),
+            exe, "exp7_forklift_fixed", args.dt, args.end_time, args.lift_start, args.lift_end, args.lift_speed,
+            args.pallet_y, args.pallet_z, args.ground_pallet_friction, args.fork_pallet_friction,
+            args.stark_min_contact_stiffness, True, False, False, "STARK fixed-kappa baseline", args.force_run),
         run_stark_case(
-            exe, "exp7_forklift_al", args.dt, args.end_time, args.lift_start, args.lift_end, args.lift_speed,
-            args.pallet_y, args.pallet_z, args.ground_pallet_friction, args.fork_pallet_friction, True, args.force_run),
+            exe, "exp7_forklift_contact_consistent", args.dt, args.end_time, args.lift_start, args.lift_end, args.lift_speed,
+            args.pallet_y, args.pallet_z, args.ground_pallet_friction, args.fork_pallet_friction,
+            args.stark_min_contact_stiffness, True, True, True, "STARK contact-consistent IPC", args.force_run),
         run_pychrono_case(
             "nsc_psor", args.dt, args.end_time, args.lift_start, args.lift_end, args.lift_speed,
             args.pallet_y, args.pallet_z, args.fork_pallet_friction,

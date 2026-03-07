@@ -26,15 +26,11 @@ def parse_list(values: str, cast=float) -> List[float]:
     return out
 
 
-def stark_env(run_name: str, dt: float, end_time: float, use_al: bool) -> Dict[str, str]:
+def stark_env(run_name: str, dt: float, end_time: float) -> Dict[str, str]:
     env = dict(os.environ)
     env["STARK_EXP2_RUN_NAME"] = run_name
     env["STARK_EXP2_DT"] = f"{dt:.12g}"
     env["STARK_EXP2_END_TIME"] = f"{end_time:.12g}"
-    if use_al:
-        env["STARK_JOINT_AL_ENABLED"] = "1"
-    else:
-        env.pop("STARK_JOINT_AL_ENABLED", None)
     return env
 
 
@@ -75,12 +71,12 @@ def error_against_reference(ref: pd.DataFrame, cur: pd.DataFrame) -> Dict[str, f
     }
 
 
-def run_stark_case(exe: Path, run_name: str, dt: float, end_time: float, use_al: bool, force_run: bool) -> Dict[str, object]:
+def run_stark_case(exe: Path, run_name: str, dt: float, end_time: float, force_run: bool) -> Dict[str, object]:
     case_dir = OUTPUT_BASE / run_name
     logger = latest_logger(case_dir)
     if force_run or logger is None:
         cmd = [str(exe), "exp2_slider"]
-        env = stark_env(run_name, dt, end_time, use_al)
+        env = stark_env(run_name, dt, end_time)
         print(f"[a2] run STARK {run_name}")
         ret = subprocess.run(cmd, cwd=exe.parents[3], env=env)
         if ret.returncode != 0:
@@ -94,7 +90,7 @@ def run_stark_case(exe: Path, run_name: str, dt: float, end_time: float, use_al:
     state = load_state(state_csv)
     return {
         "framework": "STARK",
-        "method": "AL-IPC" if use_al else "soft",
+        "method": "STARK IPC",
         "run_name": run_name,
         "logger_file": logger.name,
         "total": metrics.get("total"),
@@ -236,12 +232,7 @@ def plot_curves(rows: List[Dict[str, object]], fig_dir: Path):
     fig, axs = plt.subplots(1, 2, figsize=(8.8, 3.8), sharex=True)
     for ax in axs:
         setup_axes(ax)
-    palette = {
-        "soft": "#e377c2",
-        "AL-IPC": "#1f77b4",
-        "NSC/APGD": "#2ca02c",
-        "SMC": "#d62728",
-    }
+    palette = {"STARK IPC": "#1f77b4", "NSC/APGD": "#2ca02c", "SMC": "#d62728"}
     for row in rows:
         state = pd.read_csv(Path(row["state_csv"]))
         x_curve = sanitize_curve(state, "t", "slider_cx")
@@ -259,7 +250,7 @@ def plot_curves(rows: List[Dict[str, object]], fig_dir: Path):
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run/collect A2 crank-slider benchmark with matched-error PyChrono alignment.")
+    parser = argparse.ArgumentParser(description="Run/collect A2 crank-slider benchmark under the contact-centric paper framing.")
     parser.add_argument("--exe", type=Path, default=None)
     parser.add_argument("--dt", type=float, default=0.004)
     parser.add_argument("--ref-dt", type=float, default=0.001)
@@ -281,28 +272,24 @@ def main() -> int:
     args = parse_args()
     exe = resolve_executable(args.exe)
 
-    ref_row = run_stark_case(exe, "exp2_crank_slider_a2_reference", args.ref_dt, args.end_time, True, args.force_run)
+    ref_row = run_stark_case(exe, "exp2_crank_slider_a2_reference", args.ref_dt, args.end_time, args.force_run)
     ref_state = load_state(Path(ref_row["state_csv"]))
 
-    stark_rows = [
-        run_stark_case(exe, "exp2_crank_slider_a2_soft", args.dt, args.end_time, False, args.force_run),
-        run_stark_case(exe, "exp2_crank_slider_a2_al", args.dt, args.end_time, True, args.force_run),
-    ]
-    for row in stark_rows:
-        row.update(error_against_reference(ref_state, load_state(Path(row["state_csv"]))))
-        row["matched_target_hit"] = True
-        row["selection_target"] = "reference"
-        row["solver_max_iters"] = ""
-        row["solver_tol"] = ""
-        row["nsc_compliance"] = ""
-        row["smc_kn"] = ""
-        row["smc_kt"] = ""
-        row["smc_gn"] = ""
-        row["smc_gt"] = ""
-        row["smc_young"] = ""
-        row["smc_poisson"] = ""
+    stark_row = run_stark_case(exe, "exp2_crank_slider_a2_stark", args.dt, args.end_time, args.force_run)
+    stark_row.update(error_against_reference(ref_state, load_state(Path(stark_row["state_csv"]))))
+    stark_row["matched_target_hit"] = True
+    stark_row["selection_target"] = "reference"
+    stark_row["solver_max_iters"] = ""
+    stark_row["solver_tol"] = ""
+    stark_row["nsc_compliance"] = ""
+    stark_row["smc_kn"] = ""
+    stark_row["smc_kt"] = ""
+    stark_row["smc_gn"] = ""
+    stark_row["smc_gt"] = ""
+    stark_row["smc_young"] = ""
+    stark_row["smc_poisson"] = ""
 
-    soft_target_score = float(next(row["composite_error"] for row in stark_rows if row["method"] == "soft"))
+    target_score = float(stark_row["composite_error"])
 
     nsc_grid, smc_grid = build_pychrono_param_grid(
         parse_list(args.nsc_iters, int),
@@ -316,18 +303,18 @@ def main() -> int:
     for params in nsc_grid:
         row = run_pychrono_case("nsc_ncp", args.dt, args.end_time, params, args.force_run)
         row.update(error_against_reference(ref_state, load_state(Path(row["state_csv"]))))
-        row["selection_target"] = "soft_score_band"
+        row["selection_target"] = "stark_score_band"
         sweep_rows.append(row)
     for params in smc_grid:
         row = run_pychrono_case("smc_penalty", args.dt, args.end_time, params, args.force_run)
         row.update(error_against_reference(ref_state, load_state(Path(row["state_csv"]))))
-        row["selection_target"] = "soft_score_band"
+        row["selection_target"] = "stark_score_band"
         sweep_rows.append(row)
 
-    nsc_best = choose_matched_case([row for row in sweep_rows if row["method"] == "NSC/APGD"], soft_target_score, args.score_band)
-    smc_best = choose_matched_case([row for row in sweep_rows if row["method"] == "SMC"], soft_target_score, args.score_band)
+    nsc_best = choose_matched_case([row for row in sweep_rows if row["method"] == "NSC/APGD"], target_score, args.score_band)
+    smc_best = choose_matched_case([row for row in sweep_rows if row["method"] == "SMC"], target_score, args.score_band)
 
-    final_rows = stark_rows + [nsc_best, smc_best]
+    final_rows = [stark_row, nsc_best, smc_best]
     write_csv(sweep_rows, args.sweep_csv.resolve())
     write_csv(final_rows, args.out_csv.resolve())
     plot_curves(final_rows, args.fig_dir.resolve())

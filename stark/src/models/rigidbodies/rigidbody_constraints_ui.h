@@ -56,9 +56,6 @@
 		inline double get_tolerance_in_deg() const { return this->constraints->tolerance_in_deg[this->idx]; }; \
 		inline auto& set_tolerance_in_deg(double tolerance_in_deg) { this->constraints->tolerance_in_deg[this->idx] = tolerance_in_deg; return (*this); }; \
 
-#define _STARK_RB_CONSTRAINT_DEFINE_AL_ENABLED() \
-		inline bool is_augmented_lagrangian_enabled() const { return this->constraints->al_enabled[this->idx] > 0.0; }; \
-		inline auto& set_augmented_lagrangian_enabled(bool enabled) { this->constraints->al_enabled[this->idx] = enabled ? 1.0 : 0.0; return (*this); }; \
 
 namespace stark
 {
@@ -71,7 +68,6 @@ namespace stark
 		_STARK_RB_CONSTRAINT_DEFINITION_HEAD_ONE_RB(RBCGlobalPointHandler, RigidBodyConstraints::GlobalPoints)
 		_STARK_RB_CONSTRAINT_DEFINE_STIFFNESS()
 		_STARK_RB_CONSTRAINT_DEFINE_TOLERANCE_IN_M()
-		_STARK_RB_CONSTRAINT_DEFINE_AL_ENABLED()
 
 		inline Eigen::Vector3d get_global_target_point() const { return this->constraints->target_glob[this->idx]; };
 		inline auto& set_global_target_point(const Eigen::Vector3d& x) { this->constraints->target_glob[this->idx] = x; return (*this); };
@@ -88,7 +84,6 @@ namespace stark
 		_STARK_RB_CONSTRAINT_DEFINITION_HEAD_ONE_RB(RBCGlobalDirectionHandler, RigidBodyConstraints::GlobalDirections)
 		_STARK_RB_CONSTRAINT_DEFINE_STIFFNESS()
 		_STARK_RB_CONSTRAINT_DEFINE_TOLERANCE_IN_DEG()
-		_STARK_RB_CONSTRAINT_DEFINE_AL_ENABLED()
 
 		inline Eigen::Vector3d get_global_target_direction() const { return this->constraints->target_d_glob[this->idx]; };
 		inline auto& set_global_target_direction(const Eigen::Vector3d& x) { this->constraints->target_d_glob[this->idx] = x; return (*this); };
@@ -110,7 +105,6 @@ namespace stark
 		_STARK_RB_CONSTRAINT_DEFINITION_HEAD_TWO_RB(RBCPointHandler, RigidBodyConstraints::Points)
 		_STARK_RB_CONSTRAINT_DEFINE_STIFFNESS()
 		_STARK_RB_CONSTRAINT_DEFINE_TOLERANCE_IN_M()
-		_STARK_RB_CONSTRAINT_DEFINE_AL_ENABLED()
 
 		inline Eigen::Vector3d get_local_point_body_a() const { return this->constraints->a_loc[this->idx]; };
 		inline auto& set_local_point_body_a(const Eigen::Vector3d& x) const { this->constraints->a_loc[this->idx] = x; return (*this); };
@@ -126,9 +120,6 @@ namespace stark
 		}
 		inline Eigen::Vector3d get_recovered_force_vector() const
 		{
-			if (std::isfinite(this->constraints->al_prev_violation[this->idx])) {
-				return this->constraints->al_lambda_vec[this->idx];
-			}
 			return get_penalty_force_vector();
 		}
 		inline Eigen::Vector3d get_reaction_force_on_body_b() const
@@ -151,7 +142,6 @@ namespace stark
 		_STARK_RB_CONSTRAINT_DEFINITION_HEAD_TWO_RB(RBCPointOnAxisHandler, RigidBodyConstraints::PointOnAxes)
 		_STARK_RB_CONSTRAINT_DEFINE_STIFFNESS()
 		_STARK_RB_CONSTRAINT_DEFINE_TOLERANCE_IN_M()
-		_STARK_RB_CONSTRAINT_DEFINE_AL_ENABLED()
 
 		inline Eigen::Vector3d get_local_point_body_a() const { return this->constraints->a_loc[this->idx]; };
 		inline auto& set_local_point_body_a(const Eigen::Vector3d& x) const { this->constraints->a_loc[this->idx] = x; return (*this); };
@@ -171,7 +161,6 @@ namespace stark
 		_STARK_RB_CONSTRAINT_DEFINITION_HEAD_TWO_RB(RBCDistanceHandler, RigidBodyConstraints::Distance)
 		_STARK_RB_CONSTRAINT_DEFINE_STIFFNESS()
 		_STARK_RB_CONSTRAINT_DEFINE_TOLERANCE_IN_M()
-		_STARK_RB_CONSTRAINT_DEFINE_AL_ENABLED()
 
 		inline Eigen::Vector3d get_local_point_body_a() const { return this->constraints->a_loc[this->idx]; };
 		inline auto& set_local_point_body_a(const Eigen::Vector3d& x) const { this->constraints->a_loc[this->idx] = x; return (*this); };
@@ -191,7 +180,6 @@ namespace stark
 		_STARK_RB_CONSTRAINT_DEFINITION_HEAD_TWO_RB(RBCDistanceLimitHandler, RigidBodyConstraints::DistanceLimits)
 		_STARK_RB_CONSTRAINT_DEFINE_STIFFNESS()
 		_STARK_RB_CONSTRAINT_DEFINE_TOLERANCE_IN_M()
-		_STARK_RB_CONSTRAINT_DEFINE_AL_ENABLED()
 
 		inline Eigen::Vector3d get_local_point_body_a() const { return this->constraints->a_loc[this->idx]; };
 		inline auto& set_local_point_body_a(const Eigen::Vector3d& x) const { this->constraints->a_loc[this->idx] = x; return (*this); };
@@ -213,7 +201,6 @@ namespace stark
 		_STARK_RB_CONSTRAINT_DEFINITION_HEAD_TWO_RB(RBCDirectionHandler, RigidBodyConstraints::Directions)
 		_STARK_RB_CONSTRAINT_DEFINE_STIFFNESS()
 		_STARK_RB_CONSTRAINT_DEFINE_TOLERANCE_IN_DEG()
-		_STARK_RB_CONSTRAINT_DEFINE_AL_ENABLED()
 
 		inline Eigen::Vector3d get_local_direction_body_a() const { return this->constraints->da_loc[this->idx]; };
 		inline auto& set_local_direction_body_a(const Eigen::Vector3d& d) const { this->constraints->da_loc[this->idx] = d; return (*this); };
@@ -229,9 +216,6 @@ namespace stark
 		}
 		inline Eigen::Vector3d get_recovered_direction_force_vector() const
 		{
-			if (std::isfinite(this->constraints->al_prev_violation[this->idx])) {
-				return this->constraints->al_lambda_vec[this->idx];
-			}
 			return get_penalty_direction_force_vector();
 		}
 		inline Eigen::Vector3d get_reaction_torque_on_body_b() const
@@ -265,7 +249,6 @@ namespace stark
 		_STARK_RB_CONSTRAINT_DEFINITION_HEAD_TWO_RB(RBCAngleLimitHandler, RigidBodyConstraints::AngleLimits)
 		_STARK_RB_CONSTRAINT_DEFINE_STIFFNESS()
 		_STARK_RB_CONSTRAINT_DEFINE_TOLERANCE_IN_DEG()
-		_STARK_RB_CONSTRAINT_DEFINE_AL_ENABLED()
 
 		inline Eigen::Vector3d get_local_direction_body_a() const { return this->constraints->da_loc[this->idx]; };
 		inline auto& set_local_direction_body_a(const Eigen::Vector3d& d) const { this->constraints->da_loc[this->idx] = d; return (*this); };
@@ -454,13 +437,6 @@ namespace stark
 			this->x_lock.enable(activation);
 			return (*this);
 		};
-		inline auto& set_augmented_lagrangian_enabled(bool enabled)
-		{
-			this->anchor_point.set_augmented_lagrangian_enabled(enabled);
-			this->z_lock.set_augmented_lagrangian_enabled(enabled);
-			this->x_lock.set_augmented_lagrangian_enabled(enabled);
-			return (*this);
-		};
 	};
 
 	class RBCAttachmentHandler
@@ -519,13 +495,6 @@ namespace stark
 			this->x_lock.enable(activation);
 			return (*this);
 		};
-		inline auto& set_augmented_lagrangian_enabled(bool enabled)
-		{
-			this->point.set_augmented_lagrangian_enabled(enabled);
-			this->z_lock.set_augmented_lagrangian_enabled(enabled);
-			this->x_lock.set_augmented_lagrangian_enabled(enabled);
-			return (*this);
-		};
 	};
 
 	class RBCPointWithAngleLimitHandler
@@ -575,12 +544,6 @@ namespace stark
 		{
 			this->point.enable(activation);
 			this->angle_limit.enable(activation);
-			return (*this);
-		};
-		inline auto& set_augmented_lagrangian_enabled(bool enabled)
-		{
-			this->point.set_augmented_lagrangian_enabled(enabled);
-			this->angle_limit.set_augmented_lagrangian_enabled(enabled);
 			return (*this);
 		};
 	};
@@ -638,12 +601,6 @@ namespace stark
 			this->direction.enable(activation);
 			return (*this);
 		};
-		inline auto& set_augmented_lagrangian_enabled(bool enabled)
-		{
-			this->point.set_augmented_lagrangian_enabled(enabled);
-			this->direction.set_augmented_lagrangian_enabled(enabled);
-			return (*this);
-		};
 	};
 
 	class RBCHingeJointWithAngleLimitHandler
@@ -697,12 +654,6 @@ namespace stark
 			this->angle_limit.enable(activation);
 			return (*this);
 		};
-		inline auto& set_augmented_lagrangian_enabled(bool enabled)
-		{
-			this->hinge_joint.set_augmented_lagrangian_enabled(enabled);
-			this->angle_limit.set_augmented_lagrangian_enabled(enabled);
-			return (*this);
-		};
 	};
 
 	class RBCSpringWithLimitsHandler
@@ -752,11 +703,6 @@ namespace stark
 		{
 			this->spring.enable(activation);
 			this->distance_limit.enable(activation);
-			return (*this);
-		};
-		inline auto& set_augmented_lagrangian_enabled(bool enabled)
-		{
-			this->distance_limit.set_augmented_lagrangian_enabled(enabled);
 			return (*this);
 		};
 	};
@@ -809,12 +755,6 @@ namespace stark
 		{
 			this->point_on_axis.enable(activation);
 			this->direction.enable(activation);
-			return (*this);
-		};
-		inline auto& set_augmented_lagrangian_enabled(bool enabled)
-		{
-			this->point_on_axis.set_augmented_lagrangian_enabled(enabled);
-			this->direction.set_augmented_lagrangian_enabled(enabled);
 			return (*this);
 		};
 	};
@@ -870,12 +810,6 @@ namespace stark
 			this->direction.enable(activation);
 			return (*this);
 		};
-		inline auto& set_augmented_lagrangian_enabled(bool enabled)
-		{
-			this->slider.set_augmented_lagrangian_enabled(enabled);
-			this->direction.set_augmented_lagrangian_enabled(enabled);
-			return (*this);
-		};
 	};
 
 	class RBCPrismaticPressHandler
@@ -927,11 +861,6 @@ namespace stark
 			this->linear_velocity.enable(activation);
 			return (*this);
 		};
-		inline auto& set_augmented_lagrangian_enabled(bool enabled)
-		{
-			this->prismatic_slider.set_augmented_lagrangian_enabled(enabled);
-			return (*this);
-		};
 	};
 
 	class RBCMotorHandler
@@ -981,11 +910,6 @@ namespace stark
 		{
 			this->hinge.enable(activation);
 			this->angular_velocity.enable(activation);
-			return (*this);
-		};
-		inline auto& set_augmented_lagrangian_enabled(bool enabled)
-		{
-			this->hinge.set_augmented_lagrangian_enabled(enabled);
 			return (*this);
 		};
 	};

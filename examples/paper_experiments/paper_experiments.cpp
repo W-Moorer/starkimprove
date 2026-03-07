@@ -66,37 +66,6 @@ namespace {
         return std::string(raw);
     }
 
-    bool configure_joint_al_from_env(stark::Simulation& sim)
-    {
-        const bool enabled = env_flag("STARK_JOINT_AL_ENABLED", false);
-        if (!enabled) {
-            return false;
-        }
-
-        stark::EnergyRigidBodyConstraints::AugmentedLagrangianParams params;
-        params.enabled = true;
-        params.lagged_local_mode = env_flag("STARK_JOINT_AL_LAGGED_LOCAL_MODE", false);
-        params.post_corrector_enabled = env_flag("STARK_JOINT_AL_POST_CORRECTOR_ENABLED", true);
-        if (params.post_corrector_enabled) {
-            params.lagged_local_mode = false;
-        }
-        params.adaptive_rho = env_flag("STARK_JOINT_AL_ADAPTIVE_RHO", true);
-        params.rho0 = env_double("STARK_JOINT_AL_RHO0", 0.0);
-        params.rho_update_ratio = env_double("STARK_JOINT_AL_RHO_UPDATE_RATIO", 1.5);
-        params.sufficient_decrease_ratio = env_double("STARK_JOINT_AL_SUFFICIENT_DECREASE_RATIO", 0.9);
-        params.max_outer_iterations = env_int("STARK_JOINT_AL_MAX_OUTER", 8);
-        params.residual_smoothing = env_double("STARK_JOINT_AL_RESIDUAL_SMOOTHING", 1e-4);
-        params.post_corrector_max_iterations = env_int("STARK_JOINT_AL_POST_CORRECTOR_MAX_ITERS", 3);
-        params.post_corrector_relaxation = env_double("STARK_JOINT_AL_POST_CORRECTOR_RELAXATION", 0.8);
-        params.post_corrector_target_tolerance_ratio = env_double("STARK_JOINT_AL_POST_CORRECTOR_TARGET_TOL_RATIO", 0.1);
-        params.post_corrector_required_reduction_ratio = env_double("STARK_JOINT_AL_POST_CORRECTOR_REQUIRED_REDUCTION_RATIO", 1e-3);
-        params.post_corrector_contact_pairs_threshold = env_int_any("STARK_JOINT_AL_POST_CORRECTOR_CONTACT_PAIRS_THRESHOLD", 0);
-        params.post_corrector_min_gap_threshold = env_double("STARK_JOINT_AL_POST_CORRECTOR_MIN_GAP_THRESHOLD", 0.0);
-
-        sim.rigidbodies->set_joint_augmented_lagrangian_params(params);
-        return true;
-    }
-
     void configure_solver_from_env(stark::Settings& settings)
     {
         settings.newton.residual.tolerance = env_double("STARK_NEWTON_TOL", settings.newton.residual.tolerance);
@@ -512,14 +481,12 @@ void exp2_high_speed_impact() {
 
 void exp2_crank_slider_impact()
 {
-    const bool joint_al_enabled = env_flag("STARK_JOINT_AL_ENABLED", false);
-    const std::string default_run_name = joint_al_enabled ? "exp2_crank_slider_al" : "exp2_crank_slider_soft";
+    const std::string default_run_name = "exp2_crank_slider";
     const std::string run_name = env_string("STARK_EXP2_RUN_NAME", default_run_name);
 
     const double joint_stiffness = env_double("STARK_EXP2_JOINT_STIFFNESS", 1e6);
     const double joint_tol_m = env_double("STARK_EXP2_JOINT_TOL_M", 1e-4);
     const double joint_tol_deg = env_double("STARK_EXP2_JOINT_TOL_DEG", 0.1);
-    const bool guide_al_enabled = env_flag("STARK_EXP2_GUIDE_AL_ENABLED", false);
     const double dt = env_double("STARK_EXP2_DT", 0.002);
     const double end_time = env_double("STARK_EXP2_END_TIME", 1.2);
     const double motor_w = env_double("STARK_EXP2_MOTOR_W", -3.0);
@@ -539,9 +506,6 @@ void exp2_crank_slider_impact()
     configure_solver_from_env(settings);
 
     stark::Simulation sim(settings);
-    if (joint_al_enabled) {
-        configure_joint_al_from_env(sim);
-    }
     sim.rigidbodies->set_default_constraint_stiffness(joint_stiffness);
     sim.rigidbodies->set_default_constraint_distance_tolerance(joint_tol_m);
     sim.rigidbodies->set_default_constraint_angle_tolerance(joint_tol_deg);
@@ -636,8 +600,6 @@ void exp2_crank_slider_impact()
     slider_guide.set_stiffness(joint_stiffness);
     slider_guide.set_tolerance_in_m(joint_tol_m);
     slider_guide.set_tolerance_in_deg(joint_tol_deg);
-    slider_guide.set_augmented_lagrangian_enabled(guide_al_enabled);
-
     auto angle_deg = [](const stark::RigidBodyHandler& rb) {
         const Eigen::Vector3d x_axis = rb.transform_local_to_global_direction(Eigen::Vector3d::UnitX());
         return std::atan2(x_axis.y(), x_axis.x()) * 180.0 / M_PI;
@@ -701,8 +663,7 @@ void exp2_crank_slider_impact()
 
 void exp3_limit_stop_hinge()
 {
-    const bool joint_al_enabled = env_flag("STARK_JOINT_AL_ENABLED", false);
-    const std::string default_run_name = joint_al_enabled ? "exp3_limit_stop_al" : "exp3_limit_stop_soft";
+    const std::string default_run_name = "exp3_limit_stop";
     const std::string run_name = env_string("STARK_EXP3_RUN_NAME", default_run_name);
 
     const double joint_stiffness = env_double("STARK_EXP3_JOINT_STIFFNESS", 1e6);
@@ -729,9 +690,6 @@ void exp3_limit_stop_hinge()
     configure_solver_from_env(settings);
 
     stark::Simulation sim(settings);
-    if (joint_al_enabled) {
-        configure_joint_al_from_env(sim);
-    }
     sim.rigidbodies->set_default_constraint_stiffness(joint_stiffness);
     sim.rigidbodies->set_default_constraint_distance_tolerance(joint_tol_m);
     sim.rigidbodies->set_default_constraint_angle_tolerance(joint_tol_deg);
@@ -863,10 +821,9 @@ void exp3_limit_stop_hinge()
 namespace {
     void run_exp4_scene(bool use_fourbar_scene)
     {
-    const bool joint_al_enabled = env_flag("STARK_JOINT_AL_ENABLED", false);
     const std::string default_run_name = use_fourbar_scene
-        ? (joint_al_enabled ? "exp4_fourbar_al" : "exp4_fourbar")
-        : (joint_al_enabled ? "exp4_coupled_joints_al" : "exp4_coupled_joints");
+        ? "exp4_fourbar"
+        : "exp4_coupled_joints";
     const std::string run_name = env_string("STARK_EXP4_RUN_NAME", default_run_name);
     std::cout << "Running "
               << (use_fourbar_scene ? "Exp 4 Four-Bar: Closed Loop" : "Exp 4: Coupled Joints & Impacts (10-link chain)")
@@ -890,9 +847,6 @@ namespace {
     configure_solver_from_env(settings);
 
     stark::Simulation sim(settings);
-    if (joint_al_enabled) {
-        configure_joint_al_from_env(sim);
-    }
     sim.rigidbodies->set_default_constraint_stiffness(exp4_joint_stiffness);
     sim.rigidbodies->set_default_constraint_distance_tolerance(exp4_joint_tol_m);
     sim.rigidbodies->set_default_constraint_angle_tolerance(exp4_joint_tol_deg);
@@ -1377,15 +1331,13 @@ void exp7_forklift_lift()
     const double joint_stiffness = env_double("STARK_EXP7_JOINT_STIFFNESS", 1e6);
     const double joint_tol_m = env_double("STARK_EXP7_JOINT_TOL_M", 1e-4);
     const double joint_tol_deg = env_double("STARK_EXP7_JOINT_TOL_DEG", 0.1);
-    const bool guide_al_enabled = env_flag("STARK_EXP7_GUIDE_AL_ENABLED", false);
-    const bool joint_al_enabled = env_flag("STARK_JOINT_AL_ENABLED", false);
     const double contact_thickness = env_double("STARK_EXP7_CONTACT_THICKNESS", 1e-3);
     const double min_contact_stiffness = env_double("STARK_EXP7_MIN_CONTACT_STIFFNESS", 1e3);
     const double ground_pallet_friction = env_double("STARK_EXP7_GROUND_PALLET_FRICTION", 0.5);
     const double fork_pallet_friction = env_double("STARK_EXP7_FORK_PALLET_FRICTION", 0.4);
     const bool contact_stiffness_update = env_flag("STARK_EXP7_CONTACT_STIFFNESS_UPDATE", true);
-    const bool contact_adaptive_scheduling = env_flag("STARK_EXP7_CONTACT_ADAPTIVE_SCHEDULING", joint_al_enabled);
-    const bool contact_inertia_consistent = env_flag("STARK_EXP7_CONTACT_INERTIA_CONSISTENT", false);
+    const bool contact_adaptive_scheduling = env_flag("STARK_EXP7_CONTACT_ADAPTIVE_SCHEDULING", true);
+    const bool contact_inertia_consistent = env_flag("STARK_EXP7_CONTACT_INERTIA_CONSISTENT", true);
     const bool adaptive_dt = env_flag("STARK_EXP7_ADAPTIVE_DT", true);
 
     stark::Settings settings;
@@ -1406,9 +1358,6 @@ void exp7_forklift_lift()
     sim.rigidbodies->set_default_constraint_stiffness(joint_stiffness);
     sim.rigidbodies->set_default_constraint_distance_tolerance(joint_tol_m);
     sim.rigidbodies->set_default_constraint_angle_tolerance(joint_tol_deg);
-    if (joint_al_enabled) {
-        configure_joint_al_from_env(sim);
-    }
 
     auto global_contact = sim.interactions->contact->get_global_params();
     global_contact.default_contact_thickness = contact_thickness;
@@ -1478,7 +1427,6 @@ void exp7_forklift_lift()
     fork_lift.set_stiffness(joint_stiffness);
     fork_lift.set_tolerance_in_m(joint_tol_m);
     fork_lift.set_tolerance_in_deg(joint_tol_deg);
-    fork_lift.set_augmented_lagrangian_enabled(guide_al_enabled);
 
     const auto pallet_mesh = load_localized_obj_mesh(resolve_model_path("pallet.obj"), 1.0, Eigen::Vector3d::Zero());
     const double fork_tine_top_local = -0.296;
